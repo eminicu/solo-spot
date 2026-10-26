@@ -256,40 +256,36 @@
     return gaps;
   }
 
-  // Group lines into blocks, flag chorus-like blocks
+  // Find chorus occurrences from repeated lines. A run of chorus lines (back-to-back repeats included) is one occurrence.
   function sections(segs) {
-    const blocks = [];
+    const counts = new Map();
+    for (const sg of segs) if (sg.norm.length >= 6) counts.set(sg.norm, (counts.get(sg.norm) || 0) + 1);
+    let maxC = 0;
+    for (const v of counts.values()) maxC = Math.max(maxC, v);
+    const thr = Math.max(2, Math.ceil(maxC * 0.5));
+    const isCh = segs.map((sg) => maxC >= 2 && (counts.get(sg.norm) || 0) >= thr);
+    const runs = [];
     let cur = null;
     for (let i = 0; i < segs.length; i++) {
-      const g = i > 0 ? segs[i].start - segs[i - 1].end : Infinity;
-      if (!cur || g >= 1.8) {
-        cur = { first: i, last: i };
-        blocks.push(cur);
-      } else cur.last = i;
-    }
-    const counts = new Map();
-    for (const s of segs) if (s.norm.length >= 6) counts.set(s.norm, (counts.get(s.norm) || 0) + 1);
-    let occ = 0;
-    let prevChorus = false;
-    for (const b of blocks) {
-      let rep = 0;
-      let tot = 0;
-      for (let i = b.first; i <= b.last; i++) {
-        tot++;
-        if ((counts.get(segs[i].norm) || 0) >= 2) rep++;
+      if (isCh[i]) {
+        const bridgeable = cur && i - cur.last <= 2 && segs[i].start - segs[cur.last].end < 6;
+        if (cur && bridgeable) cur.last = i;
+        else {
+          cur = { first: i, last: i };
+          runs.push(cur);
+        }
       }
-      b.lines = tot;
-      b.repeat = tot ? rep / tot : 0;
-      b.chorus = tot >= 2 && b.repeat >= 0.5;
-      if (b.chorus && !prevChorus) occ++;
-      b.chorusN = b.chorus ? occ : 0;
-      prevChorus = b.chorus;
     }
-    const segBlock = new Array(segs.length);
-    blocks.forEach((b, bi) => {
-      for (let i = b.first; i <= b.last; i++) segBlock[i] = bi;
-    });
-    return { blocks, segBlock, chorusCount: occ };
+    // a "run" needs at least two chorus lines unless the chorus is a single repeated line
+    const real = runs.filter((r) => r.last > r.first || maxC >= 3);
+    real.forEach((r, k) => (r.n = k + 1));
+    const firstOf = new Map();
+    const lastOf = new Map();
+    for (const r of real) {
+      firstOf.set(r.first, r);
+      lastOf.set(r.last, r);
+    }
+    return { runs: real, firstOf, lastOf, isChorus: isCh, chorusCount: real.length };
   }
 
   function fmtTime(t) {
@@ -303,7 +299,8 @@
   function insertionCandidates(segs, duration, barLen, soloBars) {
     const gaps = vocalGaps(segs, duration);
     const sec = sections(segs);
-    const cands = [];
+    const total = sec.chorusCount;
+    const all = [];
     const tailPad = 0.3;
     const entry = 0.3;
     for (const g of gaps) {
@@ -313,29 +310,37 @@
       if (pos < 0.3 || pos > 0.92) continue;
       const usable = tIns - (g.start + tailPad);
       if (usable < 0.25) continue;
-      const prevB = sec.blocks[sec.segBlock[g.after]];
-      const nextB = sec.blocks[sec.segBlock[g.before]];
-      const isBreak = prevB !== nextB;
+      const after = sec.lastOf.get(g.after);
+      const before = sec.firstOf.get(g.before);
+      const gapLen = g.end - g.start;
       let label;
-      let sStruct = 0.35;
-      if (prevB && prevB.chorus && isBreak) {
-        label = 'after chorus ' + prevB.chorusN;
-        sStruct = prevB.chorusN >= 2 ? 1 : 0.6;
-      } else if (nextB && nextB.chorus && isBreak) {
-        label = 'before chorus ' + nextB.chorusN;
-        sStruct = nextB.chorusN >= 2 ? 0.75 : 0.45;
-      } else if (isBreak) {
+      let sStruct;
+      let meaningful = true;
+      if (after) {
+        label = 'after chorus ' + after.n;
+        sStruct = after.n === 2 ? 1 : after.n === 1 ? 0.5 : after.n < total ? 0.7 : 0.3;
+      } else if (before) {
+        label = before.n === total && total >= 3 ? 'before the last chorus' : 'before chorus ' + before.n;
+        sStruct = before.n === total && total >= 3 ? 0.85 : before.n >= 2 ? 0.55 : 0.35;
+      } else if (gapLen >= 1.5) {
         label = 'at the ' + fmtTime(tIns) + ' break';
         sStruct = 0.5;
       } else {
-        label = 'mid-section at ' + fmtTime(tIns);
-        sStruct = 0.15;
+        label = 'between lines at ' + fmtTime(tIns);
+        sStruct = 0.1;
+        meaningful = false;
       }
       const sPos = Math.exp(-Math.pow(pos - 0.66, 2) / (2 * 0.13 * 0.13));
       const fitBars = barLen ? Math.floor(usable / barLen + 1e-6) : 0;
       const sGap = barLen ? (fitBars >= 1 ? Math.min(1, fitBars / Math.min(soloBars || 4, 4)) : 0.1) : Math.min(1, usable / 6);
       const score = 0.42 * sPos + 0.33 * sStruct + 0.25 * sGap;
-      cands.push({ tIns, gapStart: g.start, gapEnd: g.end, label, score, pos, fitBars });
+      all.push({ tIns, gapStart: g.start, gapEnd: g.end, label, score, pos, fitBars, meaningful });
+    }
+    let cands = all.filter((c) => c.meaningful);
+    if (cands.length < 2) {
+      // few clear section breaks: offer the roomiest in-between spots too
+      const extra = all.filter((c) => !c.meaningful).sort((a, b) => b.gapEnd - b.gapStart - (a.gapEnd - a.gapStart)).slice(0, 4 - cands.length);
+      cands = cands.concat(extra);
     }
     cands.sort((a, b) => a.tIns - b.tIns);
     return { cands, gaps, sections: sec };
