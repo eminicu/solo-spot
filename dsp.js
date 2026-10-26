@@ -551,7 +551,94 @@
     return { start: pick, end: pick + len, bars, period };
   }
 
-  const api = { vocalActivity, getFFT, periodicHann, stft, istft, MDX, mdxSizes, mdxChunks, mdxInput, mdxOutput, mdxFinish, centerRemove, mono, resample, onsets, trackBeats, findDownbeat, alignToLyrics, chooseLoop };
+
+  // ---------- mapping the preview onto the song ----------
+  function median(a) {
+    if (!a.length) return null;
+    const s = a.slice().sort((x, y) => x - y);
+    const m = s.length;
+    return m % 2 ? s[(m - 1) / 2] : (s[m / 2 - 1] + s[m / 2]) / 2;
+  }
+
+  // Find a copy of `targetIdx`'s sung line inside the preview. Returns {offset, idx, tPrev} or null.
+  // align: [{offset}] candidates (song time = preview time + offset); segs: song lines.
+  function findLineInPreview(segs, targetIdx, align, pvDur, needAfter, runStarts) {
+    const norm = segs[targetIdx].norm;
+    const starts = new Set(runStarts || []);
+    for (const a of align) {
+      let best = null;
+      for (let i = 0; i < segs.length; i++) {
+        if (segs[i].norm !== norm) continue;
+        const tp = segs[i].start - a.offset;
+        if (tp < 1.2 || tp + needAfter > pvDur - 0.3) continue;
+        const pref = starts.has(i) ? 0 : 1; // prefer the first line of a chorus
+        if (!best || pref < best.pref) best = { offset: a.offset, idx: i, tPrev: tp, pref };
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  // Precise start of singing near each guess (seconds within the separated-vocal window). null when unclear.
+  function vocalOnsetsNear(vL, vR, sr, guesses, radius) {
+    radius = radius || 0.6;
+    const hop = Math.max(1, Math.round(sr * 0.01));
+    const n = Math.floor(vL.length / hop);
+    const e = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let j = i * hop; j < (i + 1) * hop; j++) s += vL[j] * vL[j] + vR[j] * vR[j];
+      e[i] = s;
+    }
+    const sm = new Float64Array(n);
+    const lin = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = 0, c = 0;
+      for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) { s += e[j]; c++; }
+      lin[i] = s / c;
+      sm[i] = Math.log(1e-9 + s / c);
+    }
+    const r = Math.round(radius / 0.01);
+    const mean = (a, b) => {
+      let s = 0, c = 0;
+      for (let i = Math.max(0, a); i <= Math.min(n - 1, b); i++) { s += lin[i]; c++; }
+      return c ? s / c : 0;
+    };
+    return guesses.map((g) => {
+      const c = Math.round(g / 0.01);
+      let best = null, bv = -Infinity;
+      for (let i = Math.max(6, c - r); i <= Math.min(n - 7, c + r); i++) {
+        const rise = sm[i + 5] - sm[i - 5];
+        if (rise > bv) { bv = rise; best = i; }
+      }
+      if (best == null || bv < 1.0) return null;
+      // the moment the (smoothed) level crosses halfway between "before" and "after"
+      const pre = mean(best - 30, best - 10);
+      const post = mean(best + 6, best + 25);
+      const half = pre + (post - pre) * 0.3;
+      let i = best - 10;
+      while (i < best + 15 && i < n - 1 && lin[i] < half) i++;
+      const a = lin[i - 1], b = lin[i];
+      const frac = b !== a ? (half - a) / (b - a) : 0;
+      return Math.max(0, (i - 1 + Math.max(0, Math.min(1, frac))) * 0.01);
+    });
+  }
+
+  // Song-time offset for a chorus copy: pairs the k-th line after `prevIdx` (whose precise preview
+  // onsets we know) with the k-th line after `targetIdx` when the words match. Median of the pairs.
+  function songOffset(segs, prevIdx, onsetOf, targetIdx, maxLines) {
+    const d = [];
+    for (let k = 0; k < (maxLines || 12); k++) {
+      const a = prevIdx + k, b = targetIdx + k;
+      if (a >= segs.length || b >= segs.length) break;
+      if (segs[a].norm !== segs[b].norm) break;
+      const o = onsetOf(a);
+      if (o != null) d.push(segs[b].start - o);
+    }
+    return d.length ? { offset: median(d), pairs: d.length, spread: d.length > 1 ? Math.max(...d) - Math.min(...d) : 0 } : null;
+  }
+
+  const api = { median, findLineInPreview, vocalOnsetsNear, songOffset, vocalActivity, getFFT, periodicHann, stft, istft, MDX, mdxSizes, mdxChunks, mdxInput, mdxOutput, mdxFinish, centerRemove, mono, resample, onsets, trackBeats, findDownbeat, alignToLyrics, chooseLoop };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SoloDSP = api;
 })(typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : globalThis);

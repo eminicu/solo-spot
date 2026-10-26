@@ -149,8 +149,9 @@ button { cursor: pointer; }
 .solosub.warn { color: var(--warn); }
 .notice { display: grid; gap: 10px; padding: 12px; border-radius: 12px; background: var(--surface-2); border: 1px dashed var(--warn); }
 .notice p { margin: 0; font-size: 14px; color: var(--ink); }
-.notice .btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--ink); }
-.seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.notice .btn { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; color: var(--ink); white-space: normal; height: auto; min-height: 40px; padding: 8px 12px; line-height: 1.2; }
+.tag:empty { display: none; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .seg button { height: 44px; border: 0; background: var(--surface-2); font: 600 17px/1 var(--display); letter-spacing: 0.04em; border-left: 1px solid var(--line); }
 .seg button:first-child { border-left: 0; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
@@ -160,6 +161,20 @@ button { cursor: pointer; }
 .tl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
 .tl-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.spots { display: flex; flex-wrap: wrap; gap: 8px; }
+.spots .chip[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.bar-prog { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar-prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+#soloControls { display: grid; gap: 12px; min-width: 0; }
+.wrap > *, .card > * { min-width: 0; }
+.timeline { min-width: 0; }
+.timeline canvas { max-width: 100%; }
+.timing { display: grid; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.timing .msg { padding-top: 8px; }
+.shift { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+.shift .btn { width: 100%; }
+.dock-btn { flex: 0 0 auto; }
+.dock-in.has-btn { grid-template-columns: auto 1fr auto auto; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .grid2 .btn, .grid3 .btn { width: 100%; padding: 0 6px; }
@@ -231,15 +246,15 @@ details.card[open] > summary::after { content: "–"; }
     <h2>Every song gets a solo</h2>
     <ol>
       <li><b>In YouTube, tap Share → Copy link</b>, then tap Paste here.</li>
-      <li><b>Tap the video to start.</b> Solo Spot finds the key and a natural spot, usually after the second chorus.</li>
-      <li><b>When the light turns red, it's yours.</b> The band keeps playing for the bars you picked, then the vocals come back in.</li>
+      <li><b>Tap the video to start.</b> Solo Spot finds the key and builds a backing track: the song's chorus with the vocals removed.</li>
+      <li><b>When the light turns red, it's yours.</b> Right before the last chorus the band plays the chorus without vocals for the bars you picked, then the real chorus comes in. Or pick the ending solo and jam as long as you like.</li>
     </ol>
-    <p class="msg">"Official audio" uploads line up best with the timing data. Music videos with long intros work too after a quick sync tap.</p>
+    <p class="msg">Use the "official audio" upload of a song when you can: its timing matches the data Solo Spot uses.</p>
   </section>
 
   <section id="stage" class="wrap" hidden>
     <div class="video"><div id="player"></div></div>
-    <p class="msg" id="playHint">Tap the video to start. The solo kicks in on its own.</p>
+    <p class="msg" id="playHint">Tap the video to start. The solo kicks in on its own once the backing is ready.</p>
 
     <div class="songline">
       <div class="names"><strong id="songTitle">Loading…</strong><span id="songArtist"></span></div>
@@ -262,82 +277,47 @@ details.card[open] > summary::after { content: "–"; }
     </article>
 
     <article class="card" id="soloCard">
-      <div class="eyebrow">Solo spot <span class="tag" id="soloTag"></span></div>
-      <div class="solohead" id="soloHead">Finding the spot…</div>
+      <div class="eyebrow">Solo <span class="tag" id="soloTag"></span></div>
+      <div class="solohead" id="soloHead">Getting the backing ready…</div>
       <p class="solosub" id="soloSub"></p>
+      <div class="bar-prog" id="backingProg" hidden><i></i></div>
       <div class="notice" id="editWarn" hidden>
         <p id="editWarnText"></p>
         <a class="btn small" id="findAudio" href="https://www.youtube.com" target="_blank" rel="noopener">Find the official audio on YouTube</a>
       </div>
-      <div class="seg" role="group" aria-label="Solo length in bars" id="barsSeg">
-        <button type="button" data-bars="2">2<small>bars</small></button>
-        <button type="button" data-bars="4">4<small>bars</small></button>
-        <button type="button" data-bars="8">8<small>bars</small></button>
-        <button type="button" data-bars="16">16<small>bars</small></button>
+      <div id="soloControls" hidden>
+        <div class="spots" id="spots" role="radiogroup" aria-label="Where the solo goes"></div>
+        <div class="seg" role="group" aria-label="Solo length in bars" id="barsSeg">
+          <button type="button" data-bars="4">4<small>bars</small></button>
+          <button type="button" data-bars="8">8<small>bars</small></button>
+          <button type="button" data-bars="16">16<small>bars</small></button>
+        </div>
+        <p class="solosub" id="endNote" hidden>The backing keeps looping after the last chorus until you tap End in the bar at the bottom.</p>
+        <div class="timeline" id="timeline"><canvas id="tl" aria-label="Song timeline. Tap to jump there."></canvas></div>
+        <div class="tl-legend"><span><i style="background:var(--vocal)"></i>Singing</span><span><i style="background:var(--accent)"></i>Solo</span><span>Tap the strip to jump</span></div>
+        <button class="btn primary wide" type="button" id="goSolo">Play from just before the solo</button>
+        <button class="btn wide" type="button" id="listenBtn">Hear the backing on its own</button>
+        <div class="timing">
+          <p class="msg">Backing comes in on the wrong beat? Shift it until it lines up.</p>
+          <div class="shift">
+            <button class="btn small" type="button" id="shiftL" aria-label="Shift backing one beat earlier">◀ 1 beat</button>
+            <span class="val" id="shiftVal">0</span>
+            <button class="btn small" type="button" id="shiftR" aria-label="Shift backing one beat later">1 beat ▶</button>
+          </div>
+          <div class="shift">
+            <button class="btn small" type="button" id="fineL" aria-label="Backing 20 milliseconds earlier">−20 ms</button>
+            <span class="val" id="fineVal">0 ms</span>
+            <button class="btn small" type="button" id="fineR" aria-label="Backing 20 milliseconds later">+20 ms</button>
+          </div>
+          <button class="btn small" type="button" id="resetSong">Reset this song's timing</button>
+        </div>
       </div>
-      <div class="timeline" id="timeline"><canvas id="tl" aria-label="Song timeline. Tap to jump there."></canvas></div>
-      <div class="tl-legend"><span><i style="background:var(--vocal)"></i>Singing</span><span><i style="background:var(--accent)"></i>Solo spot</span><span>Tap the strip to jump</span></div>
-      <button class="btn primary wide" type="button" id="goSolo">Play from just before the solo</button>
-      <div class="grid2">
-        <button class="btn small" type="button" id="prevSpot" aria-label="Earlier solo spot">◀ Earlier spot</button>
-        <button class="btn small" type="button" id="nextSpot" aria-label="Later solo spot">Later spot ▶</button>
-      </div>
-      <label class="toggle"><input type="checkbox" id="repeatSolo"> Keep looping the solo (practice)</label>
     </article>
 
     <article class="card">
       <div class="eyebrow">Tempo <span class="tag" id="tempoTag"></span></div>
       <div class="tempo"><span class="bpm" id="bpm">–<small>BPM</small></span><span class="msg" id="tempoNote"></span></div>
-      <div class="grid3">
-        <button class="btn small" type="button" id="halfT">½× Half</button>
-        <button class="btn small" type="button" id="doubleT">2× Double</button>
-        <button class="btn small" type="button" id="tapT">Tap tempo</button>
-      </div>
-      <p class="msg">If the solo loop restarts a hair early, lower the tempo. If it drags, raise it.</p>
-      <div class="nudge">
-        <button class="btn small" type="button" id="bpmMinus5" aria-label="Tempo minus 0.5">−0.5</button>
-        <button class="btn small" type="button" id="bpmMinus" aria-label="Tempo minus 0.1">−0.1</button>
-        <span class="val" id="bpmVal">±0.0</span>
-        <button class="btn small" type="button" id="bpmPlus" aria-label="Tempo plus 0.1">+0.1</button>
-        <button class="btn small" type="button" id="bpmPlus5" aria-label="Tempo plus 0.5">+0.5</button>
-      </div>
     </article>
-
-    <details class="card" id="tuneCard">
-      <summary>Fine-tune timing</summary>
-      <div class="tune">
-        <div>
-          <h4>Lyric sync</h4>
-          <p id="syncNote">Checking whether this upload matches the album timing…</p>
-          <div class="row">
-            <button class="btn small primary" type="button" id="syncTap">Singing starts now</button>
-            <button class="btn small" type="button" id="syncMinus" aria-label="Lyrics 0.1 seconds earlier">−0.1 s</button>
-            <span class="val" id="syncVal">+0.0 s</span>
-            <button class="btn small" type="button" id="syncPlus" aria-label="Lyrics 0.1 seconds later">+0.1 s</button>
-          </div>
-        </div>
-        <div>
-          <h4>Solo point</h4>
-          <p>If a word slips in before the solo, move the point earlier. If the loop lands off the beat, nudge the tempo.</p>
-          <div class="row">
-            <button class="btn small" type="button" id="ptMinus">−0.1 s</button>
-            <span class="val" id="ptVal">+0.0 s</span>
-            <button class="btn small" type="button" id="ptPlus">+0.1 s</button>
-            <button class="btn small" type="button" id="soloHere">Put the solo here</button>
-          </div>
-        </div>
-        <div>
-          <h4>Time signature</h4>
-          <p>For waltzes and other songs counted in three.</p>
-          <button class="btn small" type="button" id="beats34">3/4 time</button>
-        </div>
-        <div>
-          <h4>Reset</h4>
-          <p id="delayNote"></p>
-          <button class="btn small" type="button" id="resetSong">Reset this song's settings</button>
-        </div>
-      </div>
-    </details>
 
     <p class="sources" id="sources"></p>
   </section>
@@ -352,10 +332,12 @@ details.card[open] > summary::after { content: "–"; }
       <div class="bars" id="dockBars" hidden></div>
     </div>
     <div class="dock-key" id="dockKey"></div>
+    <button class="btn small dock-btn" type="button" id="dockBtn" hidden>Stop</button>
   </div>
 </div>
 
-<script src="core.js?v=d6d86c59"></script>
-<script src="app.js?v=d6d86c59"></script>
+<script src="core.js?v=d93b5eae"></script>
+<script src="dsp.js?v=d93b5eae"></script>
+<script src="app.js?v=d93b5eae"></script>
 </body>
 </html>

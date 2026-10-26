@@ -2,7 +2,8 @@
 /* global ort, SoloDSP */
 const ORT_VER = '1.22.0';
 const ORT_BASE = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@' + ORT_VER + '/dist/';
-importScripts(ORT_BASE + 'ort.webgpu.min.js');
+const TEST_MODE = /[?&]test=1/.test(self.location.search);
+if (!TEST_MODE) importScripts(ORT_BASE + 'ort.webgpu.min.js');
 importScripts('dsp.js?v=' + (self.location.search.match(/v=([\w]+)/) || [0, '1'])[1]);
 
 let session = null;
@@ -112,6 +113,15 @@ async function runChunks(L, R, cfg) {
 self.onmessage = async (e) => {
   const m = e.data;
   try {
+    if (m.type === 'separate' && TEST_MODE) {
+      // automated tests: a fast stand-in for the AI model
+      post({ type: 'progress', stage: 'separate', done: 1, total: 1, ms: 1, engine: 'test' });
+      const q = SoloDSP.centerRemove(m.L, m.R, 44100);
+      const vL = new Float32Array(m.L.length), vR = new Float32Array(m.R.length);
+      for (let i = 0; i < vL.length; i++) { vL[i] = m.L[i] - q.L[i]; vR[i] = m.R[i] - q.R[i]; }
+      post({ type: 'done', id: m.id, engine: 'test', instL: q.L, instR: q.R, vocL: vL, vocR: vR });
+      return;
+    }
     if (m.type === 'separate') {
       const cfg = SoloDSP.MDX[m.model || 'small'];
       await load(cfg, m.gpu !== false);
