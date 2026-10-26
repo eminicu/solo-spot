@@ -198,7 +198,7 @@
     const i = d.info;
     if (typeof i.playerState === 'number') yt.state = i.playerState;
     if (typeof i.playbackRate === 'number' && i.playbackRate > 0) yt.rate = i.playbackRate;
-    if (typeof i.duration === 'number' && i.duration > 0 && i.duration !== yt.dur && playerOnCurrent()) {
+    if (typeof i.duration === 'number' && i.duration > 0 && i.duration !== yt.dur && playerOnCurrent(i.duration)) {
       yt.dur = i.duration;
       onDuration();
     }
@@ -213,7 +213,7 @@
       const ct = yt.player.getCurrentTime();
       if (typeof ct === 'number' && (!yt.anchor || Date.now() - yt.anchor.wall > 1200)) setAnchor(ct, Date.now(), true);
       const du = yt.player.getDuration && yt.player.getDuration();
-      if (du > 0 && du !== yt.dur && playerOnCurrent()) {
+      if (du > 0 && du !== yt.dur && playerOnCurrent(du)) {
         yt.dur = du;
         onDuration();
       }
@@ -221,7 +221,8 @@
   }, 250);
 
   // after switching songs the player reports the old video's length for a moment
-  function playerOnCurrent() {
+  function playerOnCurrent(du) {
+    if (yt.staleDur && du === yt.staleDur && Date.now() - yt.switchedAt < 6000) return false;
     try {
       const d = yt.player && yt.player.getVideoData && yt.player.getVideoData();
       return !(d && d.video_id && A.vid && d.video_id !== A.vid);
@@ -231,6 +232,10 @@
   }
 
   async function showVideo(id) {
+    if (yt.dur) yt.staleDur = yt.dur;
+    yt.switchedAt = Date.now();
+    yt.dur = 0;
+    yt.anchor = null;
     await loadYTApi();
     yt.anchor = null;
     yt.dur = 0;
@@ -244,7 +249,7 @@
             yt.ready = true;
             try {
               const du = yt.player.getDuration();
-              if (du > 0 && playerOnCurrent()) {
+              if (du > 0 && playerOnCurrent(du)) {
                 yt.dur = du;
                 onDuration();
               }
@@ -326,7 +331,7 @@
     A.token++;
     engineStop(true);
     Object.assign(A, {
-      meta: null, query: null, lyrics: null, lyricResults: null, segs: null, itunes: null, deezer: null, ab: null, pv: null, pv2: null, lenTried: false,
+      meta: null, query: null, lyrics: null, lyricResults: null, segs: null, itunes: null, deezer: null, ab: null, pv: null, pv2: null, pvUsed: null, lenTried: false, lookupsDone: false,
       previewFeats: [], keyResult: null, tempo: null, backing: null, unsupported: null, progress: null, steps: {},
     });
     $('steps').textContent = '';
@@ -426,7 +431,8 @@
         if (!live()) return;
         A.lyrics = r;
         prepLyrics();
-        if (r && A.segs && A.segs.length) setStep('lyrics', 'ok', A.segs.length + ' sung lines');
+        checkLyricsLength();
+        if (A.lyrics && A.segs && A.segs.length) setStep('lyrics', 'ok', A.segs.length + ' sung lines');
         else if (r && r.instrumental) setStep('lyrics', 'bad', 'instrumental track');
         else setStep('lyrics', 'bad', 'no synced lyrics found');
       })
@@ -462,6 +468,7 @@
       renderTempo();
       setStep('preview', 'ok', 'analyzed the 30-second preview' + (pa && pd ? 's' : ''));
     } else setStep('preview', 'bad', 'no preview audio found');
+    A.lookupsDone = true;
     prepareBacking(token);
   }
   function beatsFor(pv, bpm) {
@@ -620,14 +627,21 @@
   }
 
   function onDuration() {
+    checkLyricsLength();
+    if (A.backing && lengthMismatch() != null) unsupported('edit');
+    renderSolo();
+  }
+  // use the lyric timing made for this exact length of the song
+  function checkLyricsLength() {
     if (A.lyrics && A.lyricResults && yt.dur && A.query && Math.abs((A.lyrics.duration || 0) - yt.dur) > 2.5) {
       const token = A.token, dur = yt.dur;
       const swap = (r) => {
         if (token !== A.token || !r || r === A.lyrics || Math.abs((r.duration || 0) - dur) > 3) return false;
         A.lyrics = r;
         prepLyrics();
-        setStep('lyrics', 'ok', A.segs.length + ' sung lines');
-        if ((A.pv || A.pv2) && A.steps.backing && A.steps.backing.status !== 'busy') prepareBacking(A.token);
+        if (A.segs) setStep('lyrics', 'ok', A.segs.length + ' sung lines');
+        // a run that started with the old timing stops itself; start over
+        if (A.lookupsDone) prepareBacking(A.token);
         return true;
       };
       if (!swap(C.pickLyrics(A.lyricResults, A.query.artist, A.query.track, dur)) && A.query.artist && !A.lenTried) {
@@ -639,8 +653,6 @@
         });
       }
     }
-    if (A.backing && lengthMismatch() != null) unsupported('edit');
-    renderSolo();
   }
 
   // ---------- the backing track ----------
@@ -704,13 +716,13 @@
   }
 
   async function prepareBacking(token) {
-    const live = () => token === A.token;
+    const segs = A.segs;
+    const live = () => token === A.token && A.segs === segs;
     A.backing = null;
     A.unsupported = null;
     if (!A.segs || !A.segs.length) return unsupported('nolyrics');
     if (lengthMismatch() != null) return unsupported('edit');
     if (!(A.pv || A.pv2) || !A.tempo) return unsupported('nopreview');
-    const segs = A.segs;
     const sec = C.sections(segs);
     if (!sec.runs.length) return unsupported('nochorus');
     const lrcDur = A.lyrics.duration || yt.dur;
@@ -811,9 +823,11 @@
     if (soL) {
       const lastStart = pRaw + soL.offset;
       const lastEnd = segs[segs.length - 1].end;
-      const m = Math.max(1, Math.ceil((lastEnd - lastStart + 0.2) / loopLen));
-      const at = lastStart + m * loopLen;
-      if (at < (yt.dur || lrcDur) - 1) spots.push({ id: 'end', kind: 'end', songAt: at, label: 'Ending solo' });
+      const barLen = 4 * period;
+      const n = Math.max(1, Math.ceil((lastEnd - 0.3 - lastStart) / barLen));
+      const at = lastStart + n * barLen;
+      const phase = (n * barLen) % loopLen;
+      if (at < (yt.dur || lrcDur) - 0.5) spots.push({ id: 'end', kind: 'end', songAt: at, phase: phase > loopLen - 0.05 ? 0 : phase, label: 'Ending solo' });
     }
     if (!spots.length) return unsupported('nospot');
     const L = res.instL, R = res.instR;
@@ -842,7 +856,7 @@
     const barLen = 4 * B.period;
     const at = s.songAt + (A.S.fine || 0) / 1000;
     const startInBuf = B.pRaw + (A.S.shift || 0) * B.period - B.w0;
-    if (s.kind === 'end') return { spot: s, at, startInBuf, length: Infinity, bars: null, barLen };
+    if (s.kind === 'end') return { spot: s, at, startInBuf, phase: s.phase || 0, length: Infinity, bars: null, barLen };
     const bars = A.S.bars || 8;
     return { spot: s, at, startInBuf, length: bars * barLen, bars, barLen };
   }
@@ -862,7 +876,7 @@
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime(1, when + 0.006);
     s.connect(g).connect(c.destination);
-    s.start(when, s.loopStart);
+    s.start(when, s.loopStart + (T.phase || 0));
     src = { s, g, when };
     if (isFinite(untilSec)) endBackingAt(when + untilSec, 0.012);
     return src;
@@ -949,10 +963,11 @@
       const cap = Ws + 64 * T.barLen * 1000;
       while (!me.cancel && !E.endAsked && Date.now() < cap) await sleep(100);
       if (me.cancel) return;
-      // finish at the end of the current 4-bar phrase
+      // finish at the end of the current 4-bar phrase of the loop
       const el = (Date.now() - Ws) / 1000;
       const phrase = 4 * T.barLen;
-      const endAt = Ws / 1000 + Math.ceil((el + 0.3) / phrase) * phrase;
+      const ph = T.phase || 0;
+      const endAt = Ws / 1000 + Math.ceil((ph + el + 0.3) / phrase) * phrase - ph;
       endBackingAt(ctxTimeAt(endAt * 1000) - 2 * A.backing.period, 2 * A.backing.period);
       E.Wend = endAt * 1000;
       await sleep(Math.max(0, E.Wend - Date.now() + 100));
