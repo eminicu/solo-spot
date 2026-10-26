@@ -959,8 +959,8 @@
     const tag = $('tempoTag');
     if (S.tap) tag.textContent = 'tapped by you';
     else if (A.tempo) tag.textContent = A.tempo.source === 'beatmap' ? 'from a full beat map' : A.tempo.agree > 1 ? A.tempo.agree + ' sources agree' : 'one source';
-    if (S.tadj && !S.tap) tag.textContent += ', nudged';
     else tag.textContent = '';
+    if (S.tadj && !S.tap && A.tempo) tag.textContent += ', nudged';
     const note = $('tempoNote');
     const barSec = bpm ? (60 / bpm) * (S.bpb || 4) : 0;
     note.textContent = bpm ? (S.bpb === 3 ? '3/4' : '4/4') + ' · one bar ≈ ' + barSec.toFixed(1) + ' s' : A.query ? 'Working it out…' : '';
