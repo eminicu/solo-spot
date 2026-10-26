@@ -198,7 +198,7 @@
     const i = d.info;
     if (typeof i.playerState === 'number') yt.state = i.playerState;
     if (typeof i.playbackRate === 'number' && i.playbackRate > 0) yt.rate = i.playbackRate;
-    if (typeof i.duration === 'number' && i.duration > 0 && i.duration !== yt.dur) {
+    if (typeof i.duration === 'number' && i.duration > 0 && i.duration !== yt.dur && playerOnCurrent()) {
       yt.dur = i.duration;
       onDuration();
     }
@@ -213,12 +213,22 @@
       const ct = yt.player.getCurrentTime();
       if (typeof ct === 'number' && (!yt.anchor || Date.now() - yt.anchor.wall > 1200)) setAnchor(ct, Date.now(), true);
       const du = yt.player.getDuration && yt.player.getDuration();
-      if (du > 0 && du !== yt.dur) {
+      if (du > 0 && du !== yt.dur && playerOnCurrent()) {
         yt.dur = du;
         onDuration();
       }
     } catch (e) {}
   }, 250);
+
+  // after switching songs the player reports the old video's length for a moment
+  function playerOnCurrent() {
+    try {
+      const d = yt.player && yt.player.getVideoData && yt.player.getVideoData();
+      return !(d && d.video_id && A.vid && d.video_id !== A.vid);
+    } catch (e) {
+      return true;
+    }
+  }
 
   async function showVideo(id) {
     await loadYTApi();
@@ -234,7 +244,7 @@
             yt.ready = true;
             try {
               const du = yt.player.getDuration();
-              if (du > 0) {
+              if (du > 0 && playerOnCurrent()) {
                 yt.dur = du;
                 onDuration();
               }
@@ -316,7 +326,7 @@
     A.token++;
     engineStop(true);
     Object.assign(A, {
-      meta: null, query: null, lyrics: null, lyricResults: null, segs: null, itunes: null, deezer: null, ab: null, pv: null,
+      meta: null, query: null, lyrics: null, lyricResults: null, segs: null, itunes: null, deezer: null, ab: null, pv: null, pv2: null, lenTried: false,
       previewFeats: [], keyResult: null, tempo: null, backing: null, unsupported: null, progress: null, steps: {},
     });
     $('steps').textContent = '';
@@ -432,37 +442,34 @@
       dur: (A.lyrics && A.lyrics.duration) || (A.itunes && A.itunes.dur) || yt.dur || 0,
     };
     acoustic(album, token).then((r) => { if (live()) { A.ab = r; updateKey(); } }).catch(() => {});
-    // the Apple preview drives the backing track; Deezer's helps the key
-    let pv = null;
-    if (A.itunes && A.itunes.preview) {
-      try {
-        pv = await decodePreview(A.itunes.preview, 2);
-        pv.url = A.itunes.preview;
-      } catch (e) {}
-    }
+    // two 30-second previews (Apple and Deezer often pick different parts of the song):
+    // both help the key, and the backing comes from whichever one has the chorus
+    const dec = (url, src) => (url ? decodePreview(url, 2).then((d) => Object.assign(d, { url: url.split('?')[0], src })).catch(() => null) : Promise.resolve(null));
+    const [pa, pd] = await Promise.all([dec(A.itunes && A.itunes.preview, 'apple'), dec(A.deezer && A.deezer.preview, 'deezer')]);
     if (!live()) return;
-    A.pv = pv;
-    if (pv) {
+    A.pv = pa;
+    A.pv2 = pd;
+    const main = pa || pd;
+    if (main) {
       await sleep(0);
-      A.previewFeats.push(C.keyFeatures(D.mono(pv.L, pv.R), pv.sr));
-      const tp = C.tempoFromPCM(D.mono(pv.L, pv.R), pv.sr);
-      const ons = D.onsets(D.mono(pv.L, pv.R), pv.sr);
-      const tb = D.trackBeats(ons.env, ons.rate, C.foldTempo(tp.bpm), ons.latency);
-      A.tempo = { bpm: tb.bpm, period: tb.period, beats: tb.beats };
+      const tp = C.tempoFromPCM(D.mono(main.L, main.R), main.sr);
+      beatsFor(main, C.foldTempo(tp.bpm));
+      A.tempo = { bpm: main.bpm, period: main.period, beats: main.beats };
+      for (const pv of [pa, pd]) if (pv) A.previewFeats.push(C.keyFeatures(D.mono(pv.L, pv.R), pv.sr));
+      if (pa && pd) beatsFor(pd, main.bpm);
+      if (!live()) return;
       updateKey();
       renderTempo();
-      setStep('preview', 'ok', 'analyzed the 30-second preview');
+      setStep('preview', 'ok', 'analyzed the 30-second preview' + (pa && pd ? 's' : ''));
     } else setStep('preview', 'bad', 'no preview audio found');
-    if (A.deezer && A.deezer.preview) {
-      decodePreview(A.deezer.preview, 1)
-        .then((d) => {
-          if (!live()) return;
-          A.previewFeats.push(C.keyFeatures(d.L, d.sr));
-          updateKey();
-        })
-        .catch(() => {});
-    }
     prepareBacking(token);
+  }
+  function beatsFor(pv, bpm) {
+    const ons = D.onsets(D.mono(pv.L, pv.R), pv.sr);
+    const tb = D.trackBeats(ons.env, ons.rate, bpm, ons.latency);
+    pv.bpm = tb.bpm;
+    pv.period = tb.period;
+    pv.beats = tb.beats;
   }
 
   // ---------- lookups ----------
@@ -472,20 +479,39 @@
     if (q.artist) tries.push('track_name=' + enc(q.track) + '&artist_name=' + enc(q.artist));
     tries.push('q=' + enc(q.track));
     let lastErr = null;
-    for (const qs of tries) {
-      try {
-        const res = await fetchJSON('https://lrclib.net/api/search?' + qs, 12000);
-        const pick = C.pickLyrics(res, q.artist, q.track, dur);
-        if (pick) {
-          A.lyricResults = res;
-          return pick;
-        }
-      } catch (e) {
-        lastErr = e;
+    const pool = [];
+    const seen = new Set();
+    const add = (list) => {
+      for (const r of list || []) {
+        if (!r || seen.has(r.id)) continue;
+        seen.add(r.id);
+        pool.push(r);
+      }
+    };
+    const got = await Promise.all(tries.map((qs) => fetchJSON('https://lrclib.net/api/search?' + qs, 12000).catch((e) => { lastErr = e; return null; })));
+    // the artist+title searches come first so they win ties
+    got.forEach(add);
+    A.lyricResults = pool;
+    let pick = C.pickLyrics(pool, q.artist, q.track, dur);
+    if ((!pick || (dur && Math.abs((pick.duration || 0) - dur) > 2.5)) && q.artist && dur) {
+      const extra = await lyricsByLength(q, dur);
+      if (extra) {
+        add([extra]);
+        pick = C.pickLyrics(pool, q.artist, q.track, dur);
       }
     }
+    if (pick) return pick;
     if (lastErr && lastErr.name !== 'AbortError' && !lastErr.status) throw lastErr;
     return null;
+  }
+  // LRCLIB can look a song up by its exact length
+  async function lyricsByLength(q, dur) {
+    try {
+      const r = await fetchJSON('https://lrclib.net/api/get?artist_name=' + enc(q.artist) + '&track_name=' + enc(q.track) + '&duration=' + Math.round(dur), 12000);
+      return r && r.id ? r : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   function bestMatch(list, q, dur, getT, getA, getDur) {
@@ -595,12 +621,22 @@
 
   function onDuration() {
     if (A.lyrics && A.lyricResults && yt.dur && A.query && Math.abs((A.lyrics.duration || 0) - yt.dur) > 2.5) {
-      const r = C.pickLyrics(A.lyricResults, A.query.artist, A.query.track, yt.dur);
-      if (r && r !== A.lyrics && Math.abs((r.duration || 0) - yt.dur) <= 3) {
+      const token = A.token, dur = yt.dur;
+      const swap = (r) => {
+        if (token !== A.token || !r || r === A.lyrics || Math.abs((r.duration || 0) - dur) > 3) return false;
         A.lyrics = r;
         prepLyrics();
         setStep('lyrics', 'ok', A.segs.length + ' sung lines');
-        if (A.pv && A.steps.backing && A.steps.backing.status !== 'busy') prepareBacking(A.token);
+        if ((A.pv || A.pv2) && A.steps.backing && A.steps.backing.status !== 'busy') prepareBacking(A.token);
+        return true;
+      };
+      if (!swap(C.pickLyrics(A.lyricResults, A.query.artist, A.query.track, dur)) && A.query.artist && !A.lenTried) {
+        A.lenTried = true;
+        lyricsByLength(A.query, dur).then((x) => {
+          if (!x || token !== A.token) return;
+          A.lyricResults.push(x);
+          swap(C.pickLyrics(A.lyricResults, A.query.artist, A.query.track, dur));
+        });
       }
     }
     if (A.backing && lengthMismatch() != null) unsupported('edit');
@@ -673,37 +709,50 @@
     A.unsupported = null;
     if (!A.segs || !A.segs.length) return unsupported('nolyrics');
     if (lengthMismatch() != null) return unsupported('edit');
-    if (!A.pv || !A.tempo) return unsupported('nopreview');
+    if (!(A.pv || A.pv2) || !A.tempo) return unsupported('nopreview');
     const segs = A.segs;
     const sec = C.sections(segs);
     if (!sec.runs.length) return unsupported('nochorus');
-    const period = A.tempo.period;
     const lrcDur = A.lyrics.duration || yt.dur;
     setStep('backing', 'busy', 'finding the chorus in the preview…');
     A.progress = { frac: 0.03, text: 'Finding the chorus…' };
     renderSolo();
     await sleep(10);
-    const va = D.vocalActivity(A.pv.L, A.pv.R, A.pv.sr);
-    const align = D.alignToLyrics(va.activity, va.rate, segs, lrcDur);
+    const cands = [];
+    for (const pv of [A.pv, A.pv2]) {
+      if (!pv || !pv.beats) continue;
+      const va = D.vocalActivity(pv.L, pv.R, pv.sr);
+      cands.push({ pv, align: D.alignToLyrics(va.activity, va.rate, segs, lrcDur) });
+      await sleep(0);
+    }
     if (!live()) return;
     const runStarts = sec.runs.map((r) => r.first);
-    // prefer an 8-bar loop, settle for 4
+    // best: a loop that starts where a chorus starts, 8 bars long; then 4 bars; Apple before Deezer on ties
     let found = null;
     let loopBars = 0;
+    let pv = null;
+    let bestScore = -1;
     for (const bars of [8, 4]) {
-      const len = bars * 4 * period;
-      if (len > 21) continue;
-      for (let r = sec.runs.length - 1; r >= 0 && !found; r--) found = D.findLineInPreview(segs, sec.runs[r].first, align, A.pv.dur, len + 0.6, runStarts);
-      if (found) { loopBars = bars; break; }
+      for (const c of cands) {
+        const len = bars * 4 * c.pv.period;
+        if (len > 21) continue;
+        let f = null;
+        for (let r = sec.runs.length - 1; r >= 0 && !f; r--) f = D.findLineInPreview(segs, sec.runs[r].first, c.align, c.pv.dur, len + 0.6, runStarts);
+        if (!f) continue;
+        const score = (f.pref === 0 ? 2 : 0) + (bars === 8 ? 1 : 0);
+        if (score > bestScore) { bestScore = score; found = f; loopBars = bars; pv = c.pv; }
+      }
     }
     if (!found) return unsupported('preview-no-chorus');
+    A.pvUsed = pv.src;
+    const period = pv.period;
     const loopLen = loopBars * 4 * period;
     const w0 = Math.max(0, found.tPrev - 1.5 - 2 * period);
-    const w1 = Math.min(A.pv.dur, found.tPrev + loopLen + 1.2 + 2 * period);
-    const sr = A.pv.sr;
+    const w1 = Math.min(pv.dur, found.tPrev + loopLen + 1.2 + 2 * period);
+    const sr = pv.sr;
     const a = Math.floor(w0 * sr), b = Math.floor(w1 * sr);
-    const segL = A.pv.L.slice(a, b), segR = A.pv.R.slice(a, b);
-    const key = hash(A.vid + '|' + A.pv.url + '|' + w0.toFixed(2) + '|' + w1.toFixed(2) + '|mdx9703');
+    const segL = pv.L.slice(a, b), segR = pv.R.slice(a, b);
+    const key = hash(A.vid + '|' + pv.url + '|' + w0.toFixed(2) + '|' + w1.toFixed(2) + '|mdx9703');
     let res = await cacheGet(key);
     if (!live()) return;
     if (!res) {
@@ -742,8 +791,8 @@
     const first = onsetOf(found.idx) != null ? onsetOf(found.idx) : found.tPrev;
     // the loop starts on the beat at (or just before) the chorus's first sung note, so a pickup word isn't clipped
     let pRaw = null;
-    for (const bt of A.tempo.beats) if (bt <= first + 0.06) pRaw = bt;
-    if (pRaw == null) pRaw = A.tempo.beats[0] || first;
+    for (const bt of pv.beats) if (bt <= first + 0.06) pRaw = bt;
+    if (pRaw == null) pRaw = pv.beats[0] || first;
     // where each chorus copy sits in the song
     const spots = [];
     const runs = sec.runs;
@@ -1093,9 +1142,9 @@
   const REASONS = {
     nolyrics: "There's no time-synced lyric data for this song, so Solo Spot can't find where the chorus is.",
     edit: 'This upload is a different edit than the album version, so the timing won\'t line up. The official audio upload works.',
-    nopreview: "Apple doesn't have a preview of this song, which Solo Spot needs to build the backing track.",
+    nopreview: "Apple and Deezer don't have a preview of this song, which Solo Spot needs to build the backing track.",
     nochorus: "This song doesn't have a repeating chorus Solo Spot can use for the backing.",
-    'preview-no-chorus': "Apple's 30-second preview of this song doesn't include the chorus, so there's nothing to build the backing from.",
+    'preview-no-chorus': "The 30-second previews of this song (Apple and Deezer) don't include the chorus, so there's nothing to build the backing from.",
     ai: "The vocal remover couldn't run on this device.",
     nospot: "Solo Spot couldn't line the chorus up with the song's timing.",
   };

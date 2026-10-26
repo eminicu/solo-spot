@@ -604,7 +604,7 @@
     if (!scored.length) return null;
     const close = scored.filter((x) => x.dd <= 3 && x.score >= 0.6);
     const pool = close.length ? close : scored;
-    pool.sort((a, b) => b.score - a.score);
+    pool.sort((a, b) => b.score - a.score || a.dd - b.dd);
     return pool[0].r;
   }
 
