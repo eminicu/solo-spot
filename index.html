@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Solo Spot</title>
+<meta name="description" content="Adds a guitar solo section to any song on YouTube and tells you the key.">
+<meta name="theme-color" content="#EDEFF2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1115" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Solo Spot">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one phone-width column; video on top, key + solo cards, a fixed "stage monitor" dock at the bottom. */
+:root {
+  --bg: #EDEFF2;
+  --surface: #FFFFFF;
+  --surface-2: #F4F5F7;
+  --ink: #14171C;
+  --muted: #5A6371;
+  --line: #D7DBE1;
+  --accent: #D4521C;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(212, 82, 28, 0.14);
+  --led: #E23B2E;
+  --ok: #23804F;
+  --warn: #A86400;
+  --vocal: #C3C9D2;
+  --fret: #8C94A1;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1115; --surface: #171B21; --surface-2: #1E232B; --ink: #E8EBEF; --muted: #98A2AF; --line: #2A313B;
+    --accent: #FF7A3D; --accent-ink: #1A0D06; --accent-soft: rgba(255, 122, 61, 0.16); --led: #FF4A3D; --ok: #4CC38A; --warn: #E0A23C;
+    --vocal: #3A4250; --fret: #5D6674; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1115; --surface: #171B21; --surface-2: #1E232B; --ink: #E8EBEF; --muted: #98A2AF; --line: #2A313B;
+  --accent: #FF7A3D; --accent-ink: #1A0D06; --accent-soft: rgba(255, 122, 61, 0.16); --led: #FF4A3D; --ok: #4CC38A; --warn: #E0A23C;
+  --vocal: #3A4250; --fret: #5D6674; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--body);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+[hidden] { display: none !important; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+/* Header */
+.top { display: flex; align-items: baseline; justify-content: space-between; padding-block: 14px 2px; }
+.brand { font: 700 26px/1 var(--display); letter-spacing: 0.02em; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+.brand-mark { display: inline-flex; gap: 2px; align-items: center; height: 18px; }
+.brand-mark i { display: block; width: 3px; border-radius: 2px; background: var(--fret); }
+.brand-mark i.hot { background: var(--accent); }
+.top small { color: var(--muted); font-size: 13px; }
+
+/* Link box */
+.loader { display: flex; flex-direction: column; gap: 8px; }
+.loader label { font: 600 13px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.linkrow { display: flex; gap: 8px; }
+.linkrow input {
+  flex: 1; min-width: 0; height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 16px;
+}
+.btn {
+  height: 48px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  font: 600 16px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.small { height: 36px; padding: 0 12px; font-size: 14px; border-radius: 10px; }
+.msg { font-size: 14px; color: var(--muted); margin: 0; }
+.msg.err { color: var(--led); }
+
+/* Empty state */
+.howto { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: grid; gap: 12px; }
+.howto h2 { margin: 0; font: 700 22px/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.02em; text-wrap: balance; }
+.howto ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); }
+.howto ol b { color: var(--ink); font-weight: 600; }
+
+/* Video */
+.video { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border-radius: var(--radius); overflow: hidden; background: #000; }
+.video > div, .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.songline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.songline .names { min-width: 0; }
+.songline strong { display: block; font: 700 22px/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.01em; overflow-wrap: anywhere; }
+.songline span { color: var(--muted); font-size: 15px; }
+.linkbtn { background: none; border: 0; padding: 6px 0; color: var(--accent); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.songform { display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.songform input { height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); min-width: 0; }
+.songform .row { display: flex; gap: 8px; }
+.songform .row > * { flex: 1; }
+
+/* Progress list */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.steps li { display: flex; gap: 8px; align-items: baseline; }
+.steps li::before { content: ""; flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--line); transform: translateY(-1px); }
+.steps li.busy::before { background: var(--accent); animation: blink 0.9s ease-in-out infinite; }
+.steps li.ok::before { background: var(--ok); }
+.steps li.bad::before { background: var(--led); }
+.steps li span { color: var(--ink); }
+@keyframes blink { 50% { opacity: 0.25; } }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.eyebrow { font: 600 13px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.eyebrow .tag { font: 500 12px/1 var(--body); letter-spacing: 0; text-transform: none; padding: 4px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+.eyebrow .tag.good { color: var(--ok); }
+
+.keyname { font: 700 48px/0.95 var(--display); text-transform: uppercase; letter-spacing: 0.01em; }
+.keyname.pending { color: var(--muted); font-size: 32px; }
+.play { font-size: 17px; }
+.play b { font-weight: 600; }
+.facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; color: var(--muted); font-size: 14px; }
+.fb { width: 100%; max-width: 100%; overflow-x: auto; }
+.fb svg { display: block; width: 100%; max-width: 420px; height: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chips .lbl { font-size: 14px; color: var(--muted); width: 100%; }
+.chip { height: 36px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); font-weight: 600; font-size: 14px; }
+.chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+.solohead { font: 700 26px/1.05 var(--display); text-transform: uppercase; letter-spacing: 0.01em; text-wrap: balance; }
+.solosub { font-size: 14px; color: var(--muted); margin: -4px 0 0; }
+.solosub.warn { color: var(--warn); }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.seg button { height: 44px; border: 0; background: var(--surface-2); font: 600 17px/1 var(--display); letter-spacing: 0.04em; border-left: 1px solid var(--line); }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button small { font: 500 11px/1 var(--body); display: block; margin-top: 3px; opacity: 0.8; letter-spacing: 0; }
+.timeline { position: relative; width: 100%; height: 60px; }
+.timeline canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; }
+.tl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.tl-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row .grow { flex: 1 1 auto; }
+.toggle { display: flex; gap: 10px; align-items: center; font-size: 15px; }
+.toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.tempo { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bpm { font: 500 30px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.bpm small { font: 600 14px/1 var(--display); letter-spacing: 0.08em; color: var(--muted); margin-left: 4px; }
+
+details.card { gap: 0; }
+details.card > summary { list-style: none; font: 600 15px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; cursor: pointer; min-height: 24px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after { content: "+"; font: 500 22px/1 var(--mono); color: var(--muted); }
+details.card[open] > summary::after { content: "–"; }
+.tune { display: grid; gap: 16px; padding-top: 14px; }
+.tune h4 { margin: 0 0 6px; font: 600 14px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; }
+.tune p { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.val { font: 500 14px/1 var(--mono); font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
+.sources { font-size: 12px; color: var(--muted); margin: 0; }
+.sources a { color: inherit; }
+
+/* Dock: the glanceable "stage monitor" */
+.dock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.dock-in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+.led { width: 14px; height: 14px; border-radius: 50%; background: var(--line); box-shadow: inset 0 0 0 2px rgba(0,0,0,0.08); }
+.led.wait { background: var(--accent); }
+.led.live { background: var(--led); box-shadow: 0 0 0 4px rgba(226, 59, 46, 0.22), 0 0 14px var(--led); }
+.dock-text { min-width: 0; }
+.dock-main { font: 700 22px/1.05 var(--display); text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-key { font: 700 20px/1 var(--display); text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.bars { display: flex; gap: 3px; margin-top: 6px; }
+.bars span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; position: relative; }
+.bars span.done { background: var(--led); }
+.bars span i { position: absolute; inset: 0 auto 0 0; background: var(--led); }
+.dock.solo { background: var(--surface-2); }
+
+@media (prefers-reduced-motion: reduce) { .steps li.busy::before { animation: none; } }
+@media (min-width: 720px) { .keyname { font-size: 56px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i style="height:7px"></i><i style="height:12px"></i><i class="hot" style="height:16px"></i><i class="hot" style="height:18px"></i><i style="height:11px"></i><i style="height:6px"></i></span>Solo Spot</div>
+    <small id="vers">Guitar solo maker</small>
+  </header>
+
+  <section class="loader">
+    <label for="link">YouTube link</label>
+    <div class="linkrow">
+      <input id="link" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste a link to any song">
+      <button class="btn primary" id="pasteBtn" type="button">Paste</button>
+    </div>
+    <p class="msg" id="linkMsg" role="status"></p>
+  </section>
+
+  <section class="howto" id="howto">
+    <h2>Every song gets a solo</h2>
+    <ol>
+      <li><b>In YouTube, tap Share → Copy link</b>, then tap Paste here.</li>
+      <li><b>Tap the video to start.</b> Solo Spot finds the key and a natural spot, usually after the second chorus.</li>
+      <li><b>When the light turns red, it's yours.</b> The band keeps playing for the bars you picked, then the vocals come back in.</li>
+    </ol>
+    <p class="msg">"Official audio" uploads line up best with the timing data. Music videos with long intros work too after a quick sync tap.</p>
+  </section>
+
+  <section id="stage" class="wrap" hidden>
+    <div class="video"><div id="player"></div></div>
+    <p class="msg" id="playHint">Tap the video to start. The solo kicks in on its own.</p>
+
+    <div class="songline">
+      <div class="names"><strong id="songTitle">Loading…</strong><span id="songArtist"></span></div>
+      <button class="linkbtn" id="editSong" type="button">Wrong song?</button>
+    </div>
+    <form class="songform" id="songForm" hidden>
+      <div class="row"><input id="fArtist" placeholder="Artist" autocomplete="off"><input id="fTrack" placeholder="Song title" autocomplete="off"></div>
+      <div class="row"><button class="btn primary" type="submit">Look up again</button><button class="btn" type="button" id="cancelSong">Cancel</button></div>
+    </form>
+
+    <ul class="steps" id="steps" aria-live="polite"></ul>
+
+    <article class="card" id="keyCard">
+      <div class="eyebrow">Key <span class="tag" id="keyTag"></span></div>
+      <div class="keyname pending" id="keyName">Listening…</div>
+      <div class="play" id="keyPlay"></div>
+      <ul class="facts" id="keyFacts"></ul>
+      <div class="fb" id="fretboard" aria-label="Scale shape on the fretboard"></div>
+      <div class="chips" id="keyChips"></div>
+    </article>
+
+    <article class="card" id="soloCard">
+      <div class="eyebrow">Solo spot <span class="tag" id="soloTag"></span></div>
+      <div class="solohead" id="soloHead">Finding the spot…</div>
+      <p class="solosub" id="soloSub"></p>
+      <div class="seg" role="group" aria-label="Solo length in bars" id="barsSeg">
+        <button type="button" data-bars="2">2<small>bars</small></button>
+        <button type="button" data-bars="4">4<small>bars</small></button>
+        <button type="button" data-bars="8">8<small>bars</small></button>
+        <button type="button" data-bars="16">16<small>bars</small></button>
+      </div>
+      <div class="timeline" id="timeline"><canvas id="tl" aria-label="Song timeline. Tap to jump there."></canvas></div>
+      <div class="tl-legend"><span><i style="background:var(--vocal)"></i>Singing</span><span><i style="background:var(--accent)"></i>Solo spot</span><span>Tap the strip to jump</span></div>
+      <div class="row">
+        <button class="btn small" type="button" id="prevSpot" aria-label="Earlier solo spot">◀ Earlier</button>
+        <button class="btn small primary grow" type="button" id="goSolo">Play from just before</button>
+        <button class="btn small" type="button" id="nextSpot" aria-label="Later solo spot">Later ▶</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="repeatSolo"> Keep looping the solo (practice)</label>
+    </article>
+
+    <article class="card">
+      <div class="eyebrow">Tempo <span class="tag" id="tempoTag"></span></div>
+      <div class="tempo"><span class="bpm" id="bpm">–<small>BPM</small></span><span class="msg" id="tempoNote"></span></div>
+      <div class="row">
+        <button class="btn small" type="button" id="halfT">½× half-time</button>
+        <button class="btn small" type="button" id="doubleT">2× double</button>
+        <button class="btn small" type="button" id="tapT">Tap tempo</button>
+      </div>
+    </article>
+
+    <details class="card" id="tuneCard">
+      <summary>Fine-tune timing</summary>
+      <div class="tune">
+        <div>
+          <h4>Lyric sync</h4>
+          <p id="syncNote">Checking whether this upload matches the album timing…</p>
+          <div class="row">
+            <button class="btn small primary" type="button" id="syncTap">Singing starts now</button>
+            <button class="btn small" type="button" id="syncMinus" aria-label="Lyrics 0.1 seconds earlier">−0.1 s</button>
+            <span class="val" id="syncVal">+0.0 s</span>
+            <button class="btn small" type="button" id="syncPlus" aria-label="Lyrics 0.1 seconds later">+0.1 s</button>
+          </div>
+        </div>
+        <div>
+          <h4>Solo point</h4>
+          <p>If a word slips in before the solo, move the point earlier. If the loop lands off the beat, nudge the tempo.</p>
+          <div class="row">
+            <button class="btn small" type="button" id="ptMinus">−0.1 s</button>
+            <span class="val" id="ptVal">+0.0 s</span>
+            <button class="btn small" type="button" id="ptPlus">+0.1 s</button>
+            <button class="btn small" type="button" id="soloHere">Put the solo here</button>
+          </div>
+        </div>
+        <div>
+          <h4>Tempo fine-tune</h4>
+          <div class="row">
+            <button class="btn small" type="button" id="bpmMinus">−0.1</button>
+            <span class="val" id="bpmVal">0.0</span>
+            <button class="btn small" type="button" id="bpmPlus">+0.1</button>
+            <button class="btn small" type="button" id="beats34">3/4 time</button>
+          </div>
+        </div>
+        <div>
+          <h4>Reset</h4>
+          <p id="delayNote"></p>
+          <button class="btn small" type="button" id="resetSong">Reset this song's settings</button>
+        </div>
+      </div>
+    </details>
+
+    <p class="sources" id="sources"></p>
+  </section>
+</div>
+
+<div class="dock" id="dock" role="status" aria-live="polite">
+  <div class="dock-in">
+    <div class="led" id="led" aria-hidden="true"></div>
+    <div class="dock-text">
+      <div class="dock-main" id="dockMain">Ready when you are</div>
+      <div class="dock-sub" id="dockSub">Paste a YouTube link to start</div>
+      <div class="bars" id="dockBars" hidden></div>
+    </div>
+    <div class="dock-key" id="dockKey"></div>
+  </div>
+</div>
+
+<script src="core.js?v=7"></script>
+<script src="app.js?v=7"></script>
+</body>
+</html>

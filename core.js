@@ -359,6 +359,7 @@
     const period = opts.period; // seconds per beat
     const beats = opts.beats && opts.beats.length > 16 ? opts.beats : null;
     const off = opts.beatOffset || 0; // ytTime = beatTime + off
+    const ratio = Math.max(1, Math.round(opts.ratio || 1)); // database beats per counted beat
     function nearestIdx(t) {
       const x = t - off;
       let lo = 0;
@@ -377,8 +378,8 @@
       shift(t, nBeats) {
         if (beats) {
           const j = nearestIdx(t);
-          const k = j + nBeats;
-          if (k >= 0 && k < beats.length && Math.abs(beats[j] - (t - off)) < period * 0.75) {
+          const k = j + nBeats * ratio;
+          if (k >= 0 && k < beats.length && Math.abs(beats[j] - (t - off)) < (period / ratio) * 0.75) {
             const d = beats[k] - beats[j];
             // sanity: keep within 6% of constant tempo
             if (Math.abs(d - nBeats * period) <= Math.abs(nBeats) * period * 0.06) return t + d;
@@ -454,10 +455,12 @@
     const sorted = d.slice().sort((a, b) => a - b);
     const med = sorted[sorted.length >> 1];
     if (!(med > 0.2 && med < 1.6)) return null;
-    // integer beat index, tolerating dropped/extra beats
+    // drop spurious extra beats, then give each beat an integer index (tolerates dropped beats)
+    const kept = [beats[0]];
+    for (let i = 1; i < beats.length; i++) if (beats[i] - kept[kept.length - 1] >= 0.6 * med) kept.push(beats[i]);
     const idx = [0];
-    for (let i = 1; i < beats.length; i++) idx.push(idx[i - 1] + Math.max(1, Math.round(d[i - 1] / med)));
-    let use = beats.map((t, i) => [idx[i], t]);
+    for (let i = 1; i < kept.length; i++) idx.push(idx[i - 1] + Math.max(1, Math.round((kept[i] - kept[i - 1]) / med)));
+    let use = kept.map((t, i) => [idx[i], t]);
     let a = 0;
     let p = med;
     for (let iter = 0; iter < 3; iter++) {
@@ -641,8 +644,9 @@
     return { x, sr: sr / f };
   }
 
-  const KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-  const KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+  // Shaath profiles (worked best in testing on 30 real song previews)
+  const PROF_MAJOR = [6.6, 2.0, 3.5, 2.3, 4.6, 4.0, 2.5, 5.2, 2.4, 3.7, 2.3, 3.4];
+  const PROF_MINOR = [6.5, 2.7, 3.5, 5.4, 2.6, 3.5, 2.5, 5.2, 4.0, 2.7, 4.3, 3.2];
 
   function corr(a, b) {
     const n = a.length;
@@ -657,55 +661,182 @@
     return da && db ? num / Math.sqrt(da * db) : 0;
   }
 
-  function chromaFromPCM(samples, sr) {
+  function hann(N) {
+    const w = new Float32Array(N);
+    for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
+    return w;
+  }
+
+  // Estimate how far the recording sits from A440, in cents (-50..50)
+  function estimateTuning(x, r) {
+    const N = 4096;
+    const win = hann(N);
+    const re = new Float64Array(N), im = new Float64Array(N);
+    let sx = 0, sy = 0;
+    for (let s = 0; s + N <= x.length; s += N) {
+      for (let i = 0; i < N; i++) { re[i] = x[s + i] * win[i]; im[i] = 0; }
+      fft(re, im);
+      const mag = new Float64Array(N / 2);
+      for (let k = 0; k < N / 2; k++) mag[k] = Math.hypot(re[k], im[k]);
+      for (let k = 8; k < N / 2 - 1; k++) {
+        const fq = (k * r) / N;
+        if (fq < 100 || fq > 2000) continue;
+        if (!(mag[k] > mag[k - 1] && mag[k] >= mag[k + 1])) continue;
+        const a = Math.log(mag[k - 1] + 1e-9), b = Math.log(mag[k] + 1e-9), c = Math.log(mag[k + 1] + 1e-9);
+        const d = (0.5 * (a - c)) / (a - 2 * b + c || 1);
+        const pf = ((k + d) * r) / N;
+        const midi = 69 + 12 * Math.log2(pf / 440);
+        const dev = midi - Math.round(midi);
+        const w = mag[k] * mag[k];
+        sx += w * Math.cos(2 * Math.PI * dev);
+        sy += w * Math.sin(2 * Math.PI * dev);
+      }
+    }
+    return (Math.atan2(sy, sx) / (2 * Math.PI)) * 100;
+  }
+
+  // Harmonic pitch-class profile: spectral peaks credited to the notes they could be harmonics of
+  function keyFeatures(samples, sr) {
     const { x, sr: r } = downsampleTo(samples, sr, 11025);
+    const tuning = estimateTuning(x, r);
+    const ref = 440 * Math.pow(2, tuning / 1200);
     const N = 4096;
     const hop = 2048;
-    const chroma = new Float64Array(12);
-    const win = new Float32Array(N);
-    for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
-    const binPc = new Int8Array(N / 2);
-    const binW = new Float32Array(N / 2);
-    for (let k = 1; k < N / 2; k++) {
-      const f = (k * r) / N;
-      if (f < 65 || f > 2100) { binPc[k] = -1; continue; }
-      const midi = 69 + 12 * Math.log2(f / 440);
-      const nearest = Math.round(midi);
-      const dev = Math.abs(midi - nearest);
-      binPc[k] = ((nearest % 12) + 12) % 12;
-      binW[k] = dev < 0.35 ? 1 - dev * 1.5 : 0;
-    }
-    const re = new Float64Array(N);
-    const im = new Float64Array(N);
+    const win = hann(N);
+    const re = new Float64Array(N), im = new Float64Array(N);
+    const chroma = new Float64Array(12), bass = new Float64Array(12);
+    const LO = 60, HI = 3000, HARM = 4, HW = 0.6, BASS_HI = 200;
     for (let s = 0; s + N <= x.length; s += hop) {
       let energy = 0;
       for (let i = 0; i < N; i++) { re[i] = x[s + i] * win[i]; im[i] = 0; energy += re[i] * re[i]; }
-      if (energy < 1e-6) continue;
+      if (energy < 1e-7) continue;
       fft(re, im);
-      const frame = new Float64Array(12);
-      for (let k = 1; k < N / 2; k++) {
-        if (binPc[k] < 0 || !binW[k]) continue;
-        const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
-        frame[binPc[k]] += Math.log(1 + 10 * mag) * binW[k];
+      const mag = new Float64Array(N / 2);
+      for (let k = 0; k < N / 2; k++) mag[k] = Math.hypot(re[k], im[k]);
+      const fr = new Float64Array(12), fb = new Float64Array(12);
+      for (let k = 2; k < N / 2 - 1; k++) {
+        const fq = (k * r) / N;
+        if (fq < LO || fq > HI) continue;
+        if (!(mag[k] > mag[k - 1] && mag[k] >= mag[k + 1])) continue;
+        const a = mag[k - 1], b = mag[k], c = mag[k + 1];
+        const d = (0.5 * (a - c)) / (a - 2 * b + c || 1);
+        const pf = ((k + d) * r) / N;
+        const m = b * b;
+        for (let h = 1; h <= HARM; h++) {
+          const f0 = pf / h;
+          if (f0 < LO * 0.5) break;
+          const midi = 69 + 12 * Math.log2(f0 / ref);
+          const near = Math.round(midi);
+          const dev = Math.abs(midi - near);
+          const w = Math.pow(Math.cos(Math.PI * dev), 2) * Math.pow(HW, h - 1);
+          const pc = ((near % 12) + 12) % 12;
+          fr[pc] += m * w;
+          if (f0 < BASS_HI) fb[pc] += m * w;
+        }
       }
-      let mx = 0;
-      for (let i = 0; i < 12; i++) mx = Math.max(mx, frame[i]);
-      if (mx > 0) for (let i = 0; i < 12; i++) chroma[i] += frame[i] / mx;
+      let mx = 0, mb = 0;
+      for (let i = 0; i < 12; i++) { mx = Math.max(mx, fr[i]); mb = Math.max(mb, fb[i]); }
+      if (mx > 0) for (let i = 0; i < 12; i++) chroma[i] += fr[i] / mx;
+      if (mb > 0) for (let i = 0; i < 12; i++) bass[i] += fb[i] / mb;
     }
-    return Array.from(chroma);
+    return { chroma: Array.from(chroma), bass: Array.from(bass), tuning };
   }
 
-  function keyFromChroma(chroma) {
-    const scores = [];
-    for (let pc = 0; pc < 12; pc++) {
-      const rot = (prof) => prof.map((_, i) => prof[(i - pc + 12) % 12]);
-      scores.push({ pc, scale: 'major', r: corr(chroma, rot(KK_MAJOR)) });
-      scores.push({ pc, scale: 'minor', r: corr(chroma, rot(KK_MINOR)) });
+  // Rank all 24 keys from one or more feature sets (e.g. two different 30-second previews)
+  function rankKeys(featureList) {
+    const ch = new Array(12).fill(0);
+    const bs = new Array(12).fill(0);
+    let used = 0;
+    for (const f of featureList || []) {
+      if (!f) continue;
+      const sa = f.chroma.reduce((x, y) => x + y, 0);
+      const sb = f.bass.reduce((x, y) => x + y, 0);
+      if (!sa) continue;
+      used++;
+      for (let i = 0; i < 12; i++) {
+        ch[i] += f.chroma[i] / sa;
+        if (sb) bs[i] += f.bass[i] / sb;
+      }
     }
-    scores.sort((a, b) => b.r - a.r);
-    const top = scores[0];
-    const second = scores[1];
+    if (!used) return [];
+    const s1 = ch.reduce((x, y) => x + y, 0);
+    const s2 = bs.reduce((x, y) => x + y, 0) || 1;
+    const c2 = ch.map((v, i) => v + (0.5 * bs[i] * s1) / s2);
+    const out = [];
+    for (let pc = 0; pc < 12; pc++) {
+      for (const scale of ['major', 'minor']) {
+        const p = scale === 'major' ? PROF_MAJOR : PROF_MINOR;
+        const rot = p.map((_, i) => p[(i - pc + 12) % 12]);
+        out.push({ pc, scale, r: corr(c2, rot) });
+      }
+    }
+    out.sort((a, b) => b.r - a.r);
+    return out;
+  }
+
+  // Backwards-compatible helpers
+  function chromaFromPCM(samples, sr) {
+    return keyFeatures(samples, sr).chroma;
+  }
+  function keyFromChroma(chroma) {
+    const rk = rankKeys([{ chroma, bass: new Array(12).fill(0) }]);
+    const top = rk[0], second = rk[1];
     return { pc: top.pc, scale: top.scale, confidence: Math.max(0, Math.min(1, (top.r - second.r) * 4 + 0.35)), r: top.r };
+  }
+
+  const sameKey = (a, b) => a && b && a.pc === b.pc && a.scale === b.scale;
+
+  // Merge the audio-database answer with our own preview analysis
+  // returns {main:{pc,scale}, alts:[...], sure:boolean, sources:[...]} or null
+  function combineKeys(ranked, ab) {
+    const abKey = ab && ab.key ? { pc: ab.key.pc, scale: ab.key.scale } : null;
+    let main = null;
+    let sure = false;
+    if (ranked && ranked.length) {
+      main = { pc: ranked[0].pc, scale: ranked[0].scale };
+      if (abKey) {
+        const idx = ranked.slice(0, 2).findIndex((k) => sameKey(k, abKey));
+        if (idx >= 0) main = abKey;
+        sure = sameKey(main, abKey) && (ab.key.confidence || 0) >= 0.5;
+      }
+    } else if (abKey) {
+      main = abKey;
+      sure = (ab.key.confidence || 0) >= 0.75;
+    }
+    if (!main) return null;
+    const rel = relativeKey(main.pc, main.scale);
+    const alts = [];
+    const push = (k) => {
+      if (!k || sameKey(k, main) || sameKey(k, rel) || alts.some((a) => sameKey(a, k))) return;
+      alts.push({ pc: k.pc, scale: k.scale });
+    };
+    if (abKey) push(abKey);
+    for (const k of ranked || []) {
+      if (alts.length >= 2) break;
+      push(k);
+    }
+    return { main, alts: alts.slice(0, 2), sure };
+  }
+
+  // Pick a tempo from several estimates. sources: [{bpm, w, name, rank}] (lower rank = more precise)
+  function foldTempo(b) {
+    if (!(b > 0)) return b;
+    while (b >= 152) b /= 2;
+    while (b < 72) b *= 2;
+    return b;
+  }
+  function chooseTempo(sources) {
+    const s = (sources || []).filter((x) => x && x.bpm > 30 && x.bpm < 300).map((x) => Object.assign({}, x, { f: foldTempo(x.bpm) }));
+    if (!s.length) return null;
+    let best = null;
+    for (const c of s) {
+      let sup = 0;
+      for (const o of s) if (Math.abs(o.f / c.f - 1) < 0.025) sup += o.w || 1;
+      if (!best || sup > best.sup + 1e-9 || (Math.abs(sup - best.sup) < 1e-9 && c.rank < best.c.rank)) best = { c, sup };
+    }
+    const cluster = s.filter((o) => Math.abs(o.f / best.c.f - 1) < 0.025).sort((a, b) => a.rank - b.rank);
+    const pick = cluster[0];
+    return { bpm: pick.f, raw: pick.bpm, source: pick.name, agree: cluster.length, total: s.length };
   }
 
   function onsetEnvelope(samples, sr) {
@@ -740,38 +871,49 @@
   }
 
   function tempoFromPCM(samples, sr) {
-    const { env, rate } = onsetEnvelope(samples, sr);
+    const o = onsetEnvelope(samples, sr);
+    // light smoothing so peaks have a shape we can interpolate
+    let env = o.env;
+    for (let pass = 0; pass < 2; pass++) {
+      const sm = new Float64Array(env.length);
+      for (let i = 0; i < env.length; i++) sm[i] = 0.25 * (env[i - 1] || 0) + 0.5 * env[i] + 0.25 * (env[i + 1] || 0);
+      env = sm;
+    }
+    const rate = o.rate;
     const n = env.length;
     const ac = (lag) => {
+      if (lag < 1 || lag >= n - 8) return 0;
       let s = 0;
       for (let i = 0; i + lag < n; i++) s += env[i] * env[i + lag];
       return s / (n - lag);
     };
+    const peakNear = (center, half) => {
+      let bi = Math.round(center), bv = -Infinity;
+      for (let l = Math.round(center) - half; l <= Math.round(center) + half; l++) {
+        const v = ac(l);
+        if (v > bv) { bv = v; bi = l; }
+      }
+      const a = ac(bi - 1), b = ac(bi), c = ac(bi + 1);
+      const den = a - 2 * b + c;
+      const d = den ? (0.5 * (a - c)) / den : 0;
+      return bi + Math.max(-0.5, Math.min(0.5, d));
+    };
     const minLag = Math.floor((rate * 60) / 200);
     const maxLag = Math.ceil((rate * 60) / 60);
     let best = null;
-    const vals = [];
     for (let lag = minLag; lag <= maxLag; lag++) {
       const bpm = (60 * rate) / lag;
       const prior = Math.exp(-0.5 * Math.pow(Math.log2(bpm / 115) / 0.6, 2));
-      // reward lags whose multiples also line up
       const v = (ac(lag) + 0.5 * ac(lag * 2) + 0.25 * ac(lag * 4)) * prior;
-      vals[lag] = v;
       if (!best || v > best.v) best = { lag, v };
     }
     if (!best) return null;
-    // sub-sample refine on the longest multiple that fits
-    let mult = 1;
-    while (best.lag * mult * 2 < n / 3 && mult < 16) mult *= 2;
-    const L = best.lag * mult;
-    let peak = L;
-    let pv = ac(L);
-    for (let l = L - mult; l <= L + mult; l++) { const v = ac(l); if (v > pv) { pv = v; peak = l; } }
-    const a = ac(peak - 1), b = ac(peak), c = ac(peak + 1);
-    const denom = a - 2 * b + c;
-    const delta = denom ? (0.5 * (a - c)) / denom : 0;
-    const lagBeat = (peak + Math.max(-0.5, Math.min(0.5, delta))) / mult;
-    return { bpm: (60 * rate) / lagBeat };
+    // refine step by step on longer and longer multiples of the beat
+    let lagEst = peakNear(best.lag, 1);
+    for (let mult = 2; lagEst * mult < n / 3 && mult <= 32; mult *= 2) {
+      lagEst = peakNear(lagEst * mult, 2) / mult;
+    }
+    return { bpm: (60 * rate) / lagEst };
   }
 
   // ---------- Playback engine ----------
@@ -799,8 +941,10 @@
     resync(pos) {
       const P = this.plan;
       if (!P) return;
-      if (pos < P.tIns - this.lead - 0.05) this.state = 'armed';
-      else this.state = 'done';
+      // small backward corrections are normal right after a jump; only real seeks change state
+      if (this.state === 'region' && pos >= P.rs - 0.6 && pos < P.re + 0.35) return;
+      if (this.state === 'done' && pos >= P.tIns - 1.0 && !(P.exit && pos >= P.rs - 0.6 && pos < P.re)) return;
+      this.state = pos < P.tIns - this.lead - 0.05 ? 'armed' : 'done';
       this.k = 0;
     }
     soloProgress(pos) {
@@ -843,7 +987,7 @@
       }
       const dt = (wall - prev.wall) / 1000;
       const dp = pos - prev.pos;
-      if (!(dp >= -0.05 && dp <= dt + 0.35)) {
+      if (dp < -0.5 || dp > dt + 0.6) {
         this.resync(pos);
         return null;
       }
@@ -884,7 +1028,8 @@
     parseYouTubeId, parseTimeParam, cleanTitle, cleanAuthor, stripJunk, normText, similarity,
     parseLRC, syllables, estimateLineDuration, vocalSegments, vocalGaps, sections, insertionCandidates,
     bestCandidateIndex, fmtTime, makeGrid, planSolo, refineFromBeats, aggregateAcoustic, parseAcousticBulk,
-    pickLyrics, fft, chromaFromPCM, keyFromChroma, tempoFromPCM, onsetEnvelope, SoloEngine,
+    pickLyrics, fft, chromaFromPCM, keyFromChroma, keyFeatures, rankKeys, combineKeys, estimateTuning, foldTempo, chooseTempo,
+    tempoFromPCM, onsetEnvelope, SoloEngine,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SoloCore = api;
