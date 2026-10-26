@@ -124,7 +124,7 @@
   }
 
   // ---------- YouTube ----------
-  const yt = { player: null, ready: false, state: -1, anchor: null, dur: 0, created: false, lastSeek: null, delay: 0.15 };
+  const yt = { player: null, ready: false, state: -1, anchor: null, dur: 0, created: false, lastSeek: null, delay: 0.15, rate: 1 };
   function loadYT() {
     return new Promise((resolve) => {
       if (window.YT && window.YT.Player) return resolve();
@@ -137,7 +137,7 @@
   function setAnchor(ct, wall) {
     const now = Date.now();
     if (!(wall > 0) || Math.abs(wall - now) > 3000) wall = now;
-    yt.anchor = { ct, wall };
+    yt.anchor = { ct, wall, real: true };
     const J = yt.lastSeek;
     if (J && !J.done && yt.state === 1 && wall > J.t + 700 && wall < J.t + 4000) {
       const d = (wall - J.t) / 1000 - (ct - J.target);
@@ -152,11 +152,11 @@
     const a = yt.anchor;
     if (!a) return 0;
     const w = atEpoch == null ? Date.now() : atEpoch;
-    return yt.state === 1 ? a.ct + Math.max(0, Math.min(2, (w - a.wall) / 1000)) : a.ct;
+    return yt.state === 1 ? a.ct + Math.max(0, Math.min(2, (w - a.wall) / 1000)) * (yt.rate || 1) : a.ct;
   }
   function wallWhenPos(pos) {
     const a = yt.anchor;
-    return a.wall + (pos - a.ct) * 1000;
+    return a.wall + ((pos - a.ct) * 1000) / (yt.rate || 1);
   }
   window.addEventListener('message', (e) => {
     if (!yt.player || !yt.player.getIframe) return;
@@ -168,6 +168,7 @@
     if (!d || d.event !== 'infoDelivery' || !d.info) return;
     const i = d.info;
     if (typeof i.playerState === 'number') yt.state = i.playerState;
+    if (typeof i.playbackRate === 'number' && i.playbackRate > 0) yt.rate = i.playbackRate;
     if (typeof i.duration === 'number' && i.duration > 0) yt.dur = i.duration;
     if (typeof i.currentTime === 'number') setAnchor(i.currentTime, typeof i.currentTimeLastUpdated_ === 'number' ? i.currentTimeLastUpdated_ * 1000 : Date.now());
   });
@@ -199,7 +200,12 @@
   function ytSeek(t) {
     yt.player.seekTo(Math.max(0, t), true);
     yt.lastSeek = { t: Date.now(), target: Math.max(0, t), done: false };
-    yt.anchor = { ct: Math.max(0, t), wall: Date.now() + yt.delay * 1000 };
+    yt.anchor = { ct: Math.max(0, t), wall: Date.now() + yt.delay * 1000, real: false };
+  }
+  function setRate(r) {
+    try { yt.player.setPlaybackRate(r); } catch (e) {}
+    yt.rate = r;
+    if (yt.anchor) yt.anchor = { ct: posNow(), wall: Date.now(), real: false };
   }
 
   // ---------- network ----------
@@ -447,6 +453,7 @@
     run = null;
     if (ctx) stopAudio();
     try { yt.player.unMute(); } catch (e) {}
+    try { if (yt.rate !== 1) setRate(1); } catch (e) {}
     dock('Stopped', '');
   }
 
@@ -505,34 +512,61 @@
     yt.player.pauseVideo();
     // line the (muted) video back up so it reaches the solo point exactly when the backing ends
     const Wx = Ws + (p.end - p.when) * 1000;
-    await sleep(Math.max(0, Wx - Date.now() - 2600));
+    await landAt(Se, Wx, me);
     if (me.cancel) return;
-    ytSeek(Se - 2.0);
-    yt.player.playVideo();
-    let tries = 0;
-    for (;;) {
-      if (me.cancel) return;
-      await sleep(120);
-      const left = Wx - Date.now();
-      if (left < 120) break;
-      if (yt.state !== 1 || !yt.anchor || Date.now() - yt.lastSeek.t < 450) continue;
-      const predicted = yt.anchor.ct + (Wx - yt.anchor.wall) / 1000; // where the video will be when the backing ends
-      const err = predicted - Se;
-      if (Math.abs(err) > 0.012 && left > 650 && tries < 4) {
-        tries++;
-        const target = Se - (Wx - Date.now()) / 1000 + yt.delay;
-        log('re-aim: off by ' + Math.round(err * 1000) + ' ms, seeking to ' + target.toFixed(3));
-        ytSeek(target);
-      } else if (Math.abs(err) <= 0.012) {
-        // close enough; stop correcting
-        if (left < 400) break;
-      }
-    }
     await sleep(Math.max(0, Wx - Date.now() - 15));
     if (me.cancel) return;
     yt.player.unMute();
-    const exitErr = posNow() - Se - 0.015;
-    log('vocals back at ' + posNow().toFixed(3) + ' (off by ' + Math.round(exitErr * 1000) + ' ms)');
+    log('vocals back in');
+  }
+
+  // Get the muted video to be exactly at song time `pos` at wall time `W`.
+  // A rough jump first, then small speed nudges (0.75x / 1.25x) to land on the beat.
+  async function landAt(pos, W, me) {
+    const runway = 4.5;
+    await sleep(Math.max(0, W - Date.now() - (runway + 0.8) * 1000));
+    if (me.cancel) return;
+    setRate(1);
+    ytSeek(pos - (W - Date.now()) / 1000 + yt.delay);
+    yt.player.playVideo();
+    let lastAction = Date.now();
+    let settled = false;
+    for (;;) {
+      if (me.cancel) return;
+      await sleep(40);
+      const left = (W - Date.now()) / 1000;
+      if (left < 0.12) break;
+      const a = yt.anchor;
+      // only trust a real report that arrived after our last action
+      if (yt.state !== 1 || !a || !a.real || a.wall < lastAction + 250 || yt.rate !== 1) continue;
+      const predicted = a.ct + (W - a.wall) / 1000;
+      const err = predicted - pos; // positive: video is ahead
+      if (Math.abs(err) <= 0.008) {
+        if (!settled) log('landing locked: ' + Math.round(err * 1000) + ' ms with ' + left.toFixed(1) + ' s to spare');
+        settled = true;
+        continue;
+      }
+      settled = false;
+      if (Math.abs(err) > 0.2 && left > 1.6) {
+        const target = pos - (W - Date.now()) / 1000 + yt.delay;
+        log('landing: off by ' + Math.round(err * 1000) + ' ms, jumping');
+        ytSeek(target);
+        lastAction = Date.now() + yt.delay * 1000;
+      } else if (left > 4 * Math.abs(err) + 0.35) {
+        const r = err > 0 ? 0.75 : 1.25;
+        const dur = 4 * Math.abs(err);
+        log('landing: off by ' + Math.round(err * 1000) + ' ms, playing at ' + r + 'x for ' + Math.round(dur * 1000) + ' ms');
+        setRate(r);
+        await sleep(dur * 1000);
+        setRate(1);
+        lastAction = Date.now();
+      } else {
+        log('landing: out of time, ' + Math.round(err * 1000) + ' ms off');
+        break;
+      }
+    }
+    const a = yt.anchor;
+    if (a && a.real) log('final check: ' + Math.round((a.ct + (W - a.wall) / 1000 - pos) * 1000) + ' ms from the beat');
   }
 
   function soloDock(startWall, length, bars, me) {
