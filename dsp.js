@@ -571,7 +571,10 @@
         if (segs[i].norm !== norm) continue;
         const tp = segs[i].start - a.offset;
         if (tp < 1.2 || tp + needAfter > pvDur - 0.3) continue;
-        const pref = starts.has(i) ? 0 : 1; // prefer the first line of a chorus
+        // prefer the start of a chorus: the next lines match the chorus's next lines too
+        let agree = 0;
+        while (agree < 3 && i + agree < segs.length && targetIdx + agree < segs.length && segs[i + agree].norm === segs[targetIdx + agree].norm) agree++;
+        const pref = starts.has(i) || agree >= 3 ? 0 : 1;
         if (!best || pref < best.pref) best = { offset: a.offset, idx: i, tPrev: tp, pref };
       }
       if (best) return best;
