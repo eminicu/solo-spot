@@ -1,0 +1,7 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>probe</title>
+<div id="p"></div><pre id="log"></pre>
+<script>
+window.LOG=[];window.ANCH=[];
+window.addEventListener('message',e=>{if(!/youtube/.test(e.origin))return;let d;try{d=typeof e.data==='string'?JSON.parse(e.data):e.data}catch(x){return}if(d&&d.event==='infoDelivery'&&d.info){const i=d.info;if('currentTime' in i)ANCH.push({ct:i.currentTime,lu:i.currentTimeLastUpdated_,now:Date.now(),ps:i.playerState});else if('playerState' in i)ANCH.push({ps:i.playerState,now:Date.now()});}});
+function onYouTubeIframeAPIReady(){window.P=new YT.Player('p',{videoId:'09839DpTctU',width:320,height:180,playerVars:{playsinline:1,rel:0,origin:location.origin},events:{onReady:()=>LOG.push('ready'),onStateChange:e=>LOG.push('st '+e.data+' '+Date.now()),onError:e=>LOG.push('err '+e.data)}})}
+</script><script src="https://www.youtube.com/iframe_api"></script>
