@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Solo Spot Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one column of numbered test steps; the numbers are a real sequence (listen, sync, try). */
+:root {
+  --bg: #EDEFF2; --surface: #FFFFFF; --surface-2: #F4F5F7; --ink: #14171C; --muted: #5A6371; --line: #D7DBE1;
+  --accent: #D4521C; --accent-ink: #FFFFFF; --accent-soft: rgba(212, 82, 28, 0.14); --led: #E23B2E; --ok: #23804F; --warn: #A86400;
+  --display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif; --body: "Barlow", "Helvetica Neue", Arial, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0E1115; --surface: #171B21; --surface-2: #1E232B; --ink: #E8EBEF; --muted: #98A2AF; --line: #2A313B; --accent: #FF7A3D; --accent-ink: #1A0D06; --accent-soft: rgba(255,122,61,0.16); --led: #FF4A3D; --ok: #4CC38A; --warn: #E0A23C; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #0E1115; --surface: #171B21; --surface-2: #1E232B; --ink: #E8EBEF; --muted: #98A2AF; --line: #2A313B; --accent: #FF7A3D; --accent-ink: #1A0D06; --accent-soft: rgba(255,122,61,0.16); --led: #FF4A3D; --ok: #4CC38A; --warn: #E0A23C; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--body); padding-top: env(safe-area-inset-top, 0px); padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+[hidden] { display: none !important; }
+button, input { font: inherit; color: inherit; }
+.wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+h1 { font: 700 28px/1 var(--display); text-transform: uppercase; letter-spacing: 0.02em; margin: 16px 0 0; }
+.lead { margin: 0; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.step { font: 600 13px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.card h2 { margin: -4px 0 0; font: 700 22px/1.1 var(--display); text-transform: uppercase; }
+.card p { margin: 0; font-size: 15px; color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.linkrow { display: flex; gap: 8px; }
+.linkrow input { flex: 1; min-width: 0; height: 46px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); font-size: 16px; }
+.btn { min-height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); font: 600 16px/1.1 var(--display); letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.on { outline: 3px solid var(--accent); outline-offset: 1px; }
+.choices { display: grid; gap: 8px; }
+.choice { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; text-align: left; padding: 10px 14px; }
+.choice b { font: 700 18px/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.03em; }
+.choice small { grid-column: 2; font: 400 13px/1.3 var(--body); color: var(--muted); text-transform: none; letter-spacing: 0; }
+.choice .tag { grid-row: span 2; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 700 16px/1 var(--display); background: var(--surface); border: 1px solid var(--line); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.steps li { position: relative; padding-left: 16px; }
+.steps li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.steps li.busy::before { background: var(--accent); }
+.steps li.ok::before { background: var(--ok); }
+.steps li.bad::before { background: var(--led); }
+.steps li span { color: var(--ink); }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.video { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
+.video > div, .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.tap { height: 96px; font-size: 26px; border-radius: 16px; }
+.tap:active { transform: scale(0.98); }
+.shift { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+.val { font: 500 15px/1 var(--mono); text-align: center; min-width: 90px; }
+.note { font-size: 13px; color: var(--muted); }
+.warn { color: var(--warn); }
+.dock { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.dock-in { max-width: 560px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+.led { width: 14px; height: 14px; border-radius: 50%; background: var(--line); flex: 0 0 auto; }
+.led.live { background: var(--led); box-shadow: 0 0 12px var(--led); }
+.led.wait { background: var(--accent); }
+#dockText { font: 700 20px/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.02em; }
+#log { font: 12px/1.4 var(--mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Solo Spot Lab</h1>
+  <p class="lead">Three ways to build the solo section. Listen, sync once, try each transition, then tell me which one sounds right.</p>
+
+  <section class="card">
+    <div class="step">Song</div>
+    <div class="linkrow"><input id="link" type="url" placeholder="YouTube link (default: Never Gonna Give You Up)" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn primary" id="loadBtn" type="button">Load</button></div>
+    <ul class="steps" id="steps"></ul>
+    <div class="bar" id="aiBar" hidden><i></i></div>
+  </section>
+
+  <section class="card">
+    <div class="step">Step 1</div>
+    <h2>Listen to the backing</h2>
+    <p id="loopInfo">These are the chorus bars that will play under your solo, looped twice.</p>
+    <div class="choices">
+      <button class="btn choice" type="button" data-play="orig"><span class="tag">0</span><b>Original</b><small>With vocals, for reference</small></button>
+      <button class="btn choice" type="button" data-play="quick"><span class="tag">A</span><b>Quick vocal removal</b><small>Instant, a little thinner</small></button>
+      <button class="btn choice" type="button" data-play="ai" id="aiPlay" disabled><span class="tag">B</span><b>AI vocal removal</b><small id="aiState">Processing…</small></button>
+    </div>
+    <p class="note">Does the loop start on the "1" of the bar? If not, shift it:</p>
+    <div class="shift">
+      <button class="btn" type="button" id="shiftL">◀ 1 beat</button>
+      <span class="val" id="shiftVal">0 beats</span>
+      <button class="btn" type="button" id="shiftR">1 beat ▶</button>
+    </div>
+    <button class="btn" type="button" id="stopBtn">Stop</button>
+  </section>
+
+  <section class="card">
+    <div class="step">Step 2</div>
+    <h2>Sync to the video</h2>
+    <p>Start the video (tap it). Then tap the big button on the "1" of each bar, at least 4 bars in a row. This tells the app exactly where the beat is.</p>
+    <div class="video"><div id="player"></div></div>
+    <button class="btn primary tap" type="button" id="tapBtn">Tap on the 1</button>
+    <p class="note" id="syncState">Not synced yet.</p>
+  </section>
+
+  <section class="card">
+    <div class="step">Step 3</div>
+    <h2>Try the solo transition</h2>
+    <p id="spotInfo">The solo goes in right before a chorus. Each button starts the video a few seconds before it.</p>
+    <div class="choices">
+      <button class="btn choice" type="button" data-try="jump"><span class="tag">0</span><b>Current app</b><small>Jumps back inside the video</small></button>
+      <button class="btn choice" type="button" data-try="quick"><span class="tag">A</span><b>Quick removal</b><small>Video pauses, backing plays, video comes back</small></button>
+      <button class="btn choice" type="button" data-try="ai" id="aiTry" disabled><span class="tag">B</span><b>AI removal</b><small>Same handoff, cleaner backing</small></button>
+    </div>
+    <p class="note">If the backing comes in a beat early or late, use the shift buttons in Step 1 and try again.</p>
+    <button class="btn" type="button" id="stopBtn2">Stop</button>
+  </section>
+
+  <details class="card">
+    <summary class="step">Technical log</summary>
+    <pre id="log"></pre>
+  </details>
+</div>
+<div class="dock"><div class="dock-in"><div class="led" id="led"></div><div id="dockText">Load a song to start</div></div></div>
+<script src="core.js?v=3d5f2eb6"></script>
+<script src="dsp.js?v=3d5f2eb6"></script>
+<script src="lab.js?v=3d5f2eb6"></script>
+</body>
+</html>
