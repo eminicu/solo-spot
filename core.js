@@ -323,10 +323,10 @@
         label = before.n === total && total >= 3 ? 'before the last chorus' : 'before chorus ' + before.n;
         sStruct = before.n === total && total >= 3 ? 0.85 : before.n >= 2 ? 0.55 : 0.35;
       } else if (gapLen >= 1.5) {
-        label = 'at the ' + fmtTime(tIns) + ' break';
+        label = 'instrumental break';
         sStruct = 0.5;
       } else {
-        label = 'between lines at ' + fmtTime(tIns);
+        label = 'between lines';
         sStruct = 0.1;
         meaningful = false;
       }
@@ -334,9 +334,11 @@
       const fitBars = barLen ? Math.floor(usable / barLen + 1e-6) : 0;
       const sGap = barLen ? (fitBars >= 1 ? Math.min(1, fitBars / Math.min(soloBars || 4, 4)) : 0.1) : Math.min(1, usable / 6);
       const score = 0.42 * sPos + 0.33 * sStruct + 0.25 * sGap;
-      all.push({ tIns, gapStart: g.start, gapEnd: g.end, label, score, pos, fitBars, meaningful });
+      const isBreak = !after && !before;
+      all.push({ tIns, gapStart: g.start, gapEnd: g.end, label, score, pos, fitBars, meaningful: meaningful && (!isBreak || fitBars >= 1 || gapLen >= 3) });
     }
     let cands = all.filter((c) => c.meaningful);
+    if (cands.length > 8) cands = cands.sort((a, b) => b.score - a.score).slice(0, 8);
     if (cands.length < 2) {
       // few clear section breaks: offer the roomiest in-between spots too
       const extra = all.filter((c) => !c.meaningful).sort((a, b) => b.gapEnd - b.gapStart - (a.gapEnd - a.gapStart)).slice(0, 4 - cands.length);
