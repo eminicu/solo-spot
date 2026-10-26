@@ -35,6 +35,7 @@
     meta: null, // {title, author}
     query: null, // {artist, track}
     lyrics: null, // LRCLIB record
+    lyricResults: null,
     lines: null,
     segs: null,
     instrumental: false,
@@ -309,7 +310,7 @@
   function resetAnalysis() {
     A.token++;
     Object.assign(A, {
-      meta: null, query: null, lyrics: null, lines: null, segs: null, instrumental: false, itunes: null, deezer: null, ab: null,
+      meta: null, query: null, lyrics: null, lyricResults: null, lines: null, segs: null, instrumental: false, itunes: null, deezer: null, ab: null,
       previewFeats: [], previewTempos: [], rankedKeys: [], keyResult: null, tempo: null, cands: [], candIdx: -1, plan: null, steps: {}, deferredPlan: null,
     });
     A._autoOpened = false;
@@ -400,6 +401,9 @@
     setStep('lyrics', 'busy');
     setStep('db', 'busy');
     setStep('listen', 'busy');
+    // the video length helps pick the right version of the lyric timing
+    for (let i = 0; i < 12 && !yt.dur && live(); i++) await sleep(250);
+    if (!live()) return;
     const pLyrics = findLyrics(q, yt.dur)
       .then((r) => {
         if (!live()) return;
@@ -464,7 +468,10 @@
       try {
         const res = await fetchJSON('https://lrclib.net/api/search?' + qs, 12000);
         const pick = C.pickLyrics(res, q.artist, q.track, dur);
-        if (pick) return pick;
+        if (pick) {
+          A.lyricResults = res;
+          return pick;
+        }
       } catch (e) {
         lastErr = e;
       }
@@ -653,6 +660,15 @@
   }
 
   function onDuration() {
+    // a version of the lyric timing that matches this video's length beats the album version
+    if (A.lyrics && A.lyricResults && yt.dur && A.query && Math.abs((A.lyrics.duration || 0) - yt.dur) > 2.5) {
+      const r = C.pickLyrics(A.lyricResults, A.query.artist, A.query.track, yt.dur);
+      if (r && r !== A.lyrics && Math.abs((r.duration || 0) - yt.dur) <= 3) {
+        A.lyrics = r;
+        prepLyrics();
+        setStep('lyrics', 'ok', 'found (' + (A.segs ? A.segs.length : 0) + ' sung lines)');
+      }
+    }
     autoSync();
     replan();
   }
@@ -993,7 +1009,21 @@
       if (P.soloBars > P.loopBars * P.n) t += '';
     }
     sub.textContent = t;
+    renderEditWarn();
     drawTimeline();
+  }
+
+  function renderEditWarn() {
+    const box = $('editWarn');
+    const st = syncStatus();
+    if (!st || st.kind !== 'mismatch' || !A.query) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    $('editWarnText').textContent = 'This video is ' + Math.abs(st.diff).toFixed(0) + ' s ' + (st.diff > 0 ? 'longer' : 'shorter') + ' than the album version, so the vocal timing may drift. The official audio upload lines up exactly.';
+    const q = (A.query.artist ? A.query.artist + ' ' : '') + A.query.track + ' official audio';
+    $('findAudio').href = 'https://www.youtube.com/results?search_query=' + enc(q);
   }
 
   function cap(s) {
@@ -1009,6 +1039,7 @@
     else if (st.kind === 'match') note.textContent = 'This upload matches the album timing, so no sync is needed.';
     else if (st.kind === 'mismatch') note.textContent = 'This upload is ' + Math.abs(st.diff).toFixed(0) + ' s ' + (st.diff > 0 ? 'longer' : 'shorter') + ' than the album version. While it plays, tap the button the moment the singing first starts.';
     else note.textContent = 'Play the video to check the timing.';
+    renderEditWarn();
     const tuneOpen = st && st.kind === 'mismatch';
     if (tuneOpen && !A._autoOpened) {
       $('tuneCard').open = true;

@@ -144,6 +144,9 @@ button { cursor: pointer; }
 .solohead { font: 700 26px/1.05 var(--display); text-transform: uppercase; letter-spacing: 0.01em; text-wrap: balance; }
 .solosub { font-size: 14px; color: var(--muted); margin: -4px 0 0; }
 .solosub.warn { color: var(--warn); }
+.notice { display: grid; gap: 10px; padding: 12px; border-radius: 12px; background: var(--surface-2); border: 1px dashed var(--warn); }
+.notice p { margin: 0; font-size: 14px; color: var(--ink); }
+.notice .btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--ink); }
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .seg button { height: 44px; border: 0; background: var(--surface-2); font: 600 17px/1 var(--display); letter-spacing: 0.04em; border-left: 1px solid var(--line); }
 .seg button:first-child { border-left: 0; }
@@ -256,6 +259,10 @@ details.card[open] > summary::after { content: "–"; }
       <div class="eyebrow">Solo spot <span class="tag" id="soloTag"></span></div>
       <div class="solohead" id="soloHead">Finding the spot…</div>
       <p class="solosub" id="soloSub"></p>
+      <div class="notice" id="editWarn" hidden>
+        <p id="editWarnText"></p>
+        <a class="btn small" id="findAudio" href="https://www.youtube.com" target="_blank" rel="noopener">Find the official audio on YouTube</a>
+      </div>
       <div class="seg" role="group" aria-label="Solo length in bars" id="barsSeg">
         <button type="button" data-bars="2">2<small>bars</small></button>
         <button type="button" data-bars="4">4<small>bars</small></button>
@@ -338,7 +345,7 @@ details.card[open] > summary::after { content: "–"; }
   </div>
 </div>
 
-<script src="core.js?v=7fd873d4"></script>
-<script src="app.js?v=7fd873d4"></script>
+<script src="core.js?v=95f9c6e8"></script>
+<script src="app.js?v=95f9c6e8"></script>
 </body>
 </html>

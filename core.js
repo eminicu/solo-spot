@@ -582,25 +582,28 @@
     return out;
   }
 
-  // Pick the best LRCLIB result
+  // Pick the best LRCLIB result. When the video length is known, a version of that length wins.
   function pickLyrics(results, artist, track, duration) {
-    let best = null;
+    const scored = [];
     for (const r of results || []) {
       if (!r) continue;
       const synced = !!(r.syncedLyrics && r.syncedLyrics.trim());
       if (!synced && !r.instrumental) continue;
       const sT = similarity(r.trackName || r.name, track);
       const sA = artist ? similarity(r.artistName, artist) : 0.5;
+      if (sT < 0.34 || (artist && sA < 0.3)) continue;
       let sD = 0.5;
       if (duration && r.duration) {
         const dd = Math.abs(r.duration - duration);
         sD = dd <= 2 ? 1 : dd <= 6 ? 0.75 : dd <= 20 ? 0.45 : 0.15;
       }
-      const score = sT * 0.45 + sA * 0.3 + sD * 0.25 + (synced ? 0.02 : 0);
-      if (sT < 0.34) continue;
-      if (!best || score > best.score) best = { r, score };
+      scored.push({ r, score: sT * 0.45 + sA * 0.3 + sD * 0.25 + (synced ? 0.02 : 0), dd: duration && r.duration ? Math.abs(r.duration - duration) : Infinity });
     }
-    return best ? best.r : null;
+    if (!scored.length) return null;
+    const close = scored.filter((x) => x.dd <= 3 && x.score >= 0.6);
+    const pool = close.length ? close : scored;
+    pool.sort((a, b) => b.score - a.score);
+    return pool[0].r;
   }
 
   // ---------- Audio analysis (fallback when no database data) ----------
