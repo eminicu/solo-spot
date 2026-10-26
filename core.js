@@ -927,7 +927,8 @@
     constructor(opts) {
       opts = opts || {};
       this.lead = opts.lead == null ? 0.045 : opts.lead;
-      this.delayEst = opts.delayEst == null ? 0.15 : opts.delayEst;
+      this.delayEst = opts.delayEst == null ? 0.15 : opts.delayEst; // short jump back (already buffered)
+      this.delayFar = opts.delayFar == null ? this.delayEst + 0.05 : opts.delayFar; // long or forward jump
       this.plan = null;
       this.state = 'idle';
       this.k = 0;
@@ -962,11 +963,16 @@
       const barLen = loopLen / P.loopBars;
       return { elapsed, total, bar: Math.floor(elapsed / barLen) + 1, bars: this.repeatForever ? null : P.soloBars, barFrac: (elapsed % barLen) / barLen };
     }
+    static jumpKind(from, to) {
+      return to < from && from - to <= 40 ? 'near' : 'far';
+    }
     jump(from, to, pos, wall) {
       const aPrime = from - pos;
-      const target = Math.max(0, to + this.delayEst - aPrime);
+      const kind = SoloEngine.jumpKind(from, to);
+      const d = kind === 'near' ? this.delayEst : this.delayFar;
+      const target = Math.max(0, to + d - aPrime);
       this.pending = { wall, target, from, to };
-      return { target, from, to };
+      return { target, from, to, kind };
     }
     tick(pos, wall, playing) {
       const P = this.plan;

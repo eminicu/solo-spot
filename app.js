@@ -138,10 +138,12 @@
       const d = (wall - J.t) / 1000 - (ct - J.target);
       if (d > 0.005 && d < 0.6) {
         J.measured = true;
-        const prev = store.get('delay', null);
+        const keyName = J.kind === 'far' ? 'delayFar' : 'delay';
+        const prev = store.get(keyName, null);
         const est = prev == null ? d : prev * 0.6 + d * 0.4;
-        store.set('delay', est);
-        engine.delayEst = est;
+        store.set(keyName, est);
+        if (J.kind === 'far') engine.delayFar = est;
+        else engine.delayEst = est;
         renderDelayNote();
       } else J.measured = true;
     }
@@ -260,7 +262,7 @@
   }
 
   // ---------- engine loop ----------
-  const engine = new C.SoloEngine({ delayEst: store.get('delay', 0.12) });
+  const engine = new C.SoloEngine({ delayEst: store.get('delay', 0.12), delayFar: store.get('delayFar', store.get('delay', 0.12) + 0.06) });
   setInterval(() => {
     if (A.deferredPlan && engine.state !== 'region') {
       const P = A.deferredPlan;
@@ -278,7 +280,7 @@
     if (cmd) {
       try {
         yt.player.seekTo(cmd.target, true);
-        yt.lastJump = { t: now, target: cmd.target, measured: false };
+        yt.lastJump = { t: now, target: cmd.target, measured: false, kind: cmd.kind };
       } catch (e) {}
     }
   }, 8);
@@ -977,8 +979,11 @@
     tag.textContent = A.cands.length > 1 && A.S.manualT == null ? 'spot ' + (A.candIdx + 1) + ' of ' + A.cands.length : '';
     const secs = (P.re - P.rs) * P.n;
     let t;
-    if (P.hasVocals) {
-      t = 'No singing-free bars near here, so you may hear some vocals in the loop. Try an earlier or later spot.';
+    if (P.hasVocals && !(A.segs && A.segs.length) && !A.instrumental) {
+      t = "Without vocal timing the loop may catch some singing. While the song plays, open Fine-tune timing and tap 'Put the solo here' just as a new section starts.";
+      sub.className = 'solosub warn';
+    } else if (P.hasVocals) {
+      t = 'No singing-free bars near here, so you may hear some vocals in the loop.' + (A.cands.length > 1 ? ' Try an earlier or later spot.' : '');
       sub.className = 'solosub warn';
     } else {
       sub.className = 'solosub';
@@ -1016,7 +1021,8 @@
 
   function renderDelayNote() {
     const d = store.get('delay', null);
-    $('delayNote').textContent = d == null ? 'Jump timing on this phone is learned automatically after the first solo.' : 'Learned jump delay on this device: ' + Math.round(d * 1000) + ' ms.';
+    const f = store.get('delayFar', null);
+    $('delayNote').textContent = d == null ? 'Jump timing on this phone is learned automatically during your first solo.' : 'Learned jump delay on this device: ' + Math.round(d * 1000) + ' ms' + (f != null ? ' (long jumps ' + Math.round(f * 1000) + ' ms)' : '') + '.';
   }
 
   function renderSources() {
@@ -1173,6 +1179,8 @@
     if (A.vid && yt.state === 1) drawTimeline();
     requestAnimationFrame(frame);
   }
+  // keep the dock fresh even when animation frames are paused
+  setInterval(renderDock, 150);
 
   // ---------- song form ----------
   function openSongForm() {
