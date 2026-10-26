@@ -541,7 +541,7 @@
       if (yt.state !== 1 || !a || !a.real || a.wall < lastAction + 250 || yt.rate !== 1) continue;
       const predicted = a.ct + (W - a.wall) / 1000;
       const err = predicted - pos; // positive: video is ahead
-      if (Math.abs(err) <= 0.008) {
+      if (Math.abs(err) <= 0.025) {
         if (!settled) log('landing locked: ' + Math.round(err * 1000) + ' ms with ' + left.toFixed(1) + ' s to spare');
         settled = true;
         continue;
