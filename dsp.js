@@ -271,7 +271,8 @@
         if (pl + pr < 1e-12) continue;
         const crossRe = lr * rr + li * ri, crossIm = li * rr - lr * ri;
         const sim = (2 * Math.sqrt(crossRe * crossRe + crossIm * crossIm)) / (pl + pr);
-        const m = Math.pow(sim, power);
+        const s2 = sim * sim;
+        const m = power === 6 ? s2 * s2 * s2 : Math.pow(sim, power);
         cRe[i] = 0.5 * (lr + rr) * m;
         cIm[i] = 0.5 * (li + ri) * m;
       }
@@ -289,6 +290,35 @@
       act[t] = Math.log(1 + s);
     }
     return { L: outL, R: outR, activity: act, activityRate: sr / hop };
+  }
+
+  // Fast "is someone singing" curve for the whole preview: dead-center energy in the vocal band (~43 frames/s)
+  function vocalActivity(L, R, sr) {
+    const a = resample(L, sr, 11025), b = resample(R, sr, 11025);
+    const r = a.sr;
+    const N = 1024, hop = 256;
+    const win = periodicHann(N);
+    const fft = getFFT(N);
+    const ar = new Float64Array(N), ai = new Float64Array(N), br = new Float64Array(N), bi = new Float64Array(N);
+    const k0 = Math.floor((300 * N) / r), k1 = Math.ceil((3500 * N) / r);
+    const out = [];
+    for (let s = 0; s + N <= a.x.length; s += hop) {
+      for (let i = 0; i < N; i++) { ar[i] = a.x[s + i] * win[i]; ai[i] = 0; br[i] = b.x[s + i] * win[i]; bi[i] = 0; }
+      fft.forward(ar, ai);
+      fft.forward(br, bi);
+      let e = 0;
+      for (let k = k0; k <= k1; k++) {
+        const pl = ar[k] * ar[k] + ai[k] * ai[k], pr = br[k] * br[k] + bi[k] * bi[k];
+        const tot = pl + pr;
+        if (tot < 1e-12) continue;
+        const cr = ar[k] * br[k] + ai[k] * bi[k], ci = ai[k] * br[k] - ar[k] * bi[k];
+        const sim = (2 * Math.sqrt(cr * cr + ci * ci)) / tot;
+        const s2 = sim * sim;
+        e += tot * s2 * s2 * s2;
+      }
+      out.push(Math.log(1 + 1000 * e));
+    }
+    return { activity: Float32Array.from(out), rate: r / hop };
   }
 
   // ---------- onsets, beats, downbeats ----------
@@ -521,7 +551,7 @@
     return { start: pick, end: pick + len, bars, period };
   }
 
-  const api = { getFFT, periodicHann, stft, istft, MDX, mdxSizes, mdxChunks, mdxInput, mdxOutput, mdxFinish, centerRemove, mono, resample, onsets, trackBeats, findDownbeat, alignToLyrics, chooseLoop };
+  const api = { vocalActivity, getFFT, periodicHann, stft, istft, MDX, mdxSizes, mdxChunks, mdxInput, mdxOutput, mdxFinish, centerRemove, mono, resample, onsets, trackBeats, findDownbeat, alignToLyrics, chooseLoop };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SoloDSP = api;
 })(typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : globalThis);
