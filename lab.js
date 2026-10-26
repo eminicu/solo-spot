@@ -294,18 +294,20 @@
       const runs = sec.runs.map((r) => ({ n: r.n, t: S.segs[r.first].start }));
       log('preview matches song at ' + al.slice(0, 3).map((a) => a.offset.toFixed(1) + 's (r ' + a.r.toFixed(2) + ')').join(', ') + '; choruses at ' + runs.map((r) => r.t.toFixed(1)).join(', '));
       // the solo goes right before the last chorus that starts past the halfway point
-      const late = runs.filter((r) => r.t > S.lrcDur * 0.5);
-      const target = late.length ? late[late.length - 1] : runs[runs.length - 1];
-      S.songChorus = target ? target.t : null;
+      const late = sec.runs.filter((r) => S.segs[r.first].start > S.lrcDur * 0.5);
+      const targetRun = late.length ? late[late.length - 1] : sec.runs[sec.runs.length - 1];
+      S.songChorus = targetRun ? S.segs[targetRun.first].start : null;
+      // in the preview, find the same sung line (choruses repeat, any copy works)
+      const norm = targetRun ? S.segs[targetRun.first].norm : null;
       for (const a of al) {
-        for (const r of runs) {
-          const cp = r.t - a.offset;
-          if (cp >= 1.2 && cp + S.loopLen + 0.6 <= S.pv.dur) { onsetCoarse = cp; runN = r.n; break; }
+        for (let j = 0; j < S.segs.length && norm; j++) {
+          if (S.segs[j].norm !== norm) continue;
+          const cp = S.segs[j].start - a.offset;
+          if (cp >= 1.2 && cp + S.loopLen + 0.6 <= S.pv.dur) { onsetCoarse = cp; runN = targetRun.n; break; }
         }
         if (onsetCoarse != null) break;
       }
       if (onsetCoarse == null && al.length) {
-        // no chorus start inside the preview: use the first chorus line we can find
         for (let i = 0; i < S.segs.length && onsetCoarse == null; i++) {
           if (!sec.isChorus[i]) continue;
           const cp = S.segs[i].start - al[0].offset;
