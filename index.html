@@ -161,6 +161,8 @@ button { cursor: pointer; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .grid2 .btn, .grid3 .btn { width: 100%; padding: 0 6px; }
 .btn.wide { width: 100%; }
+.nudge { display: grid; grid-template-columns: 1fr 1fr auto 1fr 1fr; gap: 6px; align-items: center; }
+.nudge .btn { width: 100%; padding: 0; }
 .row .grow { flex: 1 1 auto; }
 .toggle { display: flex; gap: 10px; align-items: center; font-size: 15px; }
 .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
@@ -287,6 +289,14 @@ details.card[open] > summary::after { content: "–"; }
         <button class="btn small" type="button" id="doubleT">2× Double</button>
         <button class="btn small" type="button" id="tapT">Tap tempo</button>
       </div>
+      <p class="msg">If the solo loop restarts a hair early, lower the tempo. If it drags, raise it.</p>
+      <div class="nudge">
+        <button class="btn small" type="button" id="bpmMinus5" aria-label="Tempo minus 0.5">−0.5</button>
+        <button class="btn small" type="button" id="bpmMinus" aria-label="Tempo minus 0.1">−0.1</button>
+        <span class="val" id="bpmVal">±0.0</span>
+        <button class="btn small" type="button" id="bpmPlus" aria-label="Tempo plus 0.1">+0.1</button>
+        <button class="btn small" type="button" id="bpmPlus5" aria-label="Tempo plus 0.5">+0.5</button>
+      </div>
     </article>
 
     <details class="card" id="tuneCard">
@@ -313,13 +323,9 @@ details.card[open] > summary::after { content: "–"; }
           </div>
         </div>
         <div>
-          <h4>Tempo fine-tune</h4>
-          <div class="row">
-            <button class="btn small" type="button" id="bpmMinus">−0.1</button>
-            <span class="val" id="bpmVal">0.0</span>
-            <button class="btn small" type="button" id="bpmPlus">+0.1</button>
-            <button class="btn small" type="button" id="beats34">3/4 time</button>
-          </div>
+          <h4>Time signature</h4>
+          <p>For waltzes and other songs counted in three.</p>
+          <button class="btn small" type="button" id="beats34">3/4 time</button>
         </div>
         <div>
           <h4>Reset</h4>
@@ -345,7 +351,7 @@ details.card[open] > summary::after { content: "–"; }
   </div>
 </div>
 
-<script src="core.js?v=95f9c6e8"></script>
-<script src="app.js?v=95f9c6e8"></script>
+<script src="core.js?v=c6a0c11a"></script>
+<script src="app.js?v=c6a0c11a"></script>
 </body>
 </html>

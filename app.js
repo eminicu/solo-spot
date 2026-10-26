@@ -957,13 +957,14 @@
     const tag = $('tempoTag');
     if (S.tap) tag.textContent = 'tapped by you';
     else if (A.tempo) tag.textContent = A.tempo.source === 'beatmap' ? 'from a full beat map' : A.tempo.agree > 1 ? A.tempo.agree + ' sources agree' : 'one source';
+    if (S.tadj && !S.tap) tag.textContent += ', nudged';
     else tag.textContent = '';
     const note = $('tempoNote');
     const barSec = bpm ? (60 / bpm) * (S.bpb || 4) : 0;
     note.textContent = bpm ? (S.bpb === 3 ? '3/4' : '4/4') + ' · one bar ≈ ' + barSec.toFixed(1) + ' s' : A.query ? 'Working it out…' : '';
     $('halfT').setAttribute('aria-pressed', String((S.tf || 1) < 1));
     $('doubleT').setAttribute('aria-pressed', String((S.tf || 1) > 1));
-    $('bpmVal').textContent = (S.tadj >= 0 ? '+' : '') + (S.tadj || 0).toFixed(1);
+    $('bpmVal').textContent = S.tadj ? (S.tadj > 0 ? '+' : '−') + Math.abs(S.tadj).toFixed(1) : '±0.0';
     $('beats34').textContent = S.bpb === 3 ? 'Back to 4/4' : '3/4 time';
     // bars segment hints
     document.querySelectorAll('#barsSeg button').forEach((b) => {
@@ -1353,16 +1354,15 @@
       }
       $('tapT').textContent = taps.length < 4 ? 'Tap ' + (4 - taps.length) + ' more' : 'Tap tempo';
     });
-    $('bpmMinus').addEventListener('click', () => {
-      A.S.tadj = Math.round(((A.S.tadj || 0) - 0.1) * 10) / 10;
+    const bumpBpm = (d) => {
+      A.S.tadj = Math.round(((A.S.tadj || 0) + d) * 10) / 10;
       saveS();
       replan();
-    });
-    $('bpmPlus').addEventListener('click', () => {
-      A.S.tadj = Math.round(((A.S.tadj || 0) + 0.1) * 10) / 10;
-      saveS();
-      replan();
-    });
+    };
+    $('bpmMinus').addEventListener('click', () => bumpBpm(-0.1));
+    $('bpmPlus').addEventListener('click', () => bumpBpm(0.1));
+    $('bpmMinus5').addEventListener('click', () => bumpBpm(-0.5));
+    $('bpmPlus5').addEventListener('click', () => bumpBpm(0.5));
     $('beats34').addEventListener('click', () => {
       A.S.bpb = A.S.bpb === 3 ? 4 : 3;
       saveS();

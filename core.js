@@ -843,8 +843,13 @@
       if (!best || sup > best.sup + 1e-9 || (Math.abs(sup - best.sup) < 1e-9 && c.rank < best.c.rank)) best = { c, sup };
     }
     const cluster = s.filter((o) => Math.abs(o.f / best.c.f - 1) < 0.025).sort((a, b) => a.rank - b.rank);
-    const pick = cluster[0];
-    return { bpm: pick.f, raw: pick.bpm, source: pick.name, agree: cluster.length, total: s.length };
+    const map = cluster.find((o) => o.name === 'beatmap');
+    if (map) return { bpm: map.f, raw: map.bpm, source: 'beatmap', agree: cluster.length, total: s.length };
+    // median of the agreeing estimates (robust against one sloppy source)
+    const vals = cluster.map((o) => o.f).sort((a, b) => a - b);
+    const m = vals.length;
+    const med = m % 2 ? vals[(m - 1) / 2] : (vals[m / 2 - 1] + vals[m / 2]) / 2;
+    return { bpm: med, raw: med, source: m > 1 ? 'median' : cluster[0].name, agree: m, total: s.length };
   }
 
   function onsetEnvelope(samples, sr) {
@@ -853,8 +858,7 @@
     const hop = 256;
     const re = new Float64Array(N);
     const im = new Float64Array(N);
-    const win = new Float32Array(N);
-    for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
+    const win = hann(N);
     let prev = null;
     const env = [];
     for (let s = 0; s + N <= x.length; s += hop) {
