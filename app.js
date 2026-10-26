@@ -335,6 +335,7 @@
     A.start = p.start;
     A.S = Object.assign(DEF(), store.get('v:' + p.id, {}));
     store.set('last', p.id);
+    renderRecents();
     try {
       history.replaceState(null, '', '#v=' + p.id);
     } catch (e) {}
@@ -386,6 +387,7 @@
       return;
     }
     A.query = A.S.query || C.cleanTitle(meta.title, meta.author);
+    saveRecent();
     renderSong();
     setStep('title', 'ok', (A.query.artist ? A.query.artist + ' – ' : '') + A.query.track);
     await runLookups(token);
@@ -1214,6 +1216,29 @@
   // keep the dock fresh even when animation frames are paused
   setInterval(renderDock, 150);
 
+  // ---------- recent songs ----------
+  function saveRecent() {
+    if (!A.vid || !A.query) return;
+    const list = store.get('recent', []).filter((r) => r.id !== A.vid);
+    list.unshift({ id: A.vid, track: A.query.track, artist: A.query.artist });
+    store.set('recent', list.slice(0, 8));
+    renderRecents();
+  }
+
+  function renderRecents() {
+    const box = $('recents');
+    const list = store.get('recent', []).filter((r) => r.id !== A.vid);
+    box.textContent = '';
+    box.hidden = !list.length;
+    for (const r of list) {
+      box.append(chip(r.track + (r.artist ? ' · ' + r.artist : ''), () => {
+        $('link').value = 'https://youtu.be/' + r.id;
+        loadLink(r.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }));
+    }
+  }
+
   // ---------- song form ----------
   function openSongForm() {
     const f = $('songForm');
@@ -1417,6 +1442,7 @@
 
   function boot() {
     bind();
+    renderRecents();
     renderDelayNote();
     renderSources();
     requestAnimationFrame(frame);

@@ -93,6 +93,9 @@ button { cursor: pointer; }
 .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .msg { font-size: 14px; color: var(--muted); margin: 0; }
 .msg.err { color: var(--led); }
+.recents { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.recents::-webkit-scrollbar { display: none; }
+.recents .chip { flex: 0 0 auto; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Empty state */
 .howto { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: grid; gap: 12px; }
@@ -221,6 +224,7 @@ details.card[open] > summary::after { content: "–"; }
       <button class="btn primary" id="pasteBtn" type="button">Paste</button>
     </div>
     <p class="msg" id="linkMsg" role="status"></p>
+    <div class="recents" id="recents" hidden></div>
   </section>
 
   <section class="howto" id="howto">
@@ -351,7 +355,7 @@ details.card[open] > summary::after { content: "–"; }
   </div>
 </div>
 
-<script src="core.js?v=c6a0c11a"></script>
-<script src="app.js?v=c6a0c11a"></script>
+<script src="core.js?v=6f5dfbd5"></script>
+<script src="app.js?v=6f5dfbd5"></script>
 </body>
 </html>
