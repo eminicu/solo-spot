@@ -740,9 +740,10 @@
     inWin.forEach((x, k) => { if (ons[k] != null) onsetMap.set(x.i, ons[k] + w0); });
     const onsetOf = (i) => (onsetMap.has(i) ? onsetMap.get(i) : null);
     const first = onsetOf(found.idx) != null ? onsetOf(found.idx) : found.tPrev;
-    // the loop starts on the beat nearest the chorus's first sung note
-    let pRaw = first, bd = Infinity;
-    for (const bt of A.tempo.beats) { const d = Math.abs(bt - first); if (d < bd) { bd = d; pRaw = bt; } }
+    // the loop starts on the beat at (or just before) the chorus's first sung note, so a pickup word isn't clipped
+    let pRaw = null;
+    for (const bt of A.tempo.beats) if (bt <= first + 0.06) pRaw = bt;
+    if (pRaw == null) pRaw = A.tempo.beats[0] || first;
     // where each chorus copy sits in the song
     const spots = [];
     const runs = sec.runs;
