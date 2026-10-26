@@ -425,7 +425,7 @@
       .then((r) => {
         if (!live()) return;
         A.ab = r;
-        if (r && r.agg && (r.agg.key || r.agg.tempo)) setStep('db', 'ok', 'analysis of ' + r.agg.count + ' copies of the recording' + (r.refined ? ', with beat map' : ''));
+        if (r && r.agg && (r.agg.key || r.agg.tempo)) setStep('db', 'ok', 'analysis of ' + r.agg.count + (r.agg.count === 1 ? ' copy' : ' copies') + ' of the recording' + (r.refined ? ', with beat map' : ''));
         else setStep('db', 'bad', 'not in the database (common for songs after 2022)');
         updateKey();
         updateTempo();

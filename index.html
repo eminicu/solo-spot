@@ -89,7 +89,8 @@ button { cursor: pointer; }
 }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .btn:disabled { opacity: 0.45; cursor: default; }
-.btn.small { height: 36px; padding: 0 12px; font-size: 14px; border-radius: 10px; }
+.btn.small { height: 40px; padding: 0 12px; font-size: 15px; border-radius: 10px; }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .msg { font-size: 14px; color: var(--muted); margin: 0; }
 .msg.err { color: var(--led); }
 
@@ -114,8 +115,8 @@ button { cursor: pointer; }
 
 /* Progress list */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
-.steps li { display: flex; gap: 8px; align-items: baseline; }
-.steps li::before { content: ""; flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--line); transform: translateY(-1px); }
+.steps li { position: relative; padding-left: 16px; }
+.steps li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .steps li.busy::before { background: var(--accent); animation: blink 0.9s ease-in-out infinite; }
 .steps li.ok::before { background: var(--ok); }
 .steps li.bad::before { background: var(--led); }
@@ -153,6 +154,10 @@ button { cursor: pointer; }
 .tl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
 .tl-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.grid2 .btn, .grid3 .btn { width: 100%; padding: 0 6px; }
+.btn.wide { width: 100%; }
 .row .grow { flex: 1 1 auto; }
 .toggle { display: flex; gap: 10px; align-items: center; font-size: 15px; }
 .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
@@ -259,10 +264,10 @@ details.card[open] > summary::after { content: "–"; }
       </div>
       <div class="timeline" id="timeline"><canvas id="tl" aria-label="Song timeline. Tap to jump there."></canvas></div>
       <div class="tl-legend"><span><i style="background:var(--vocal)"></i>Singing</span><span><i style="background:var(--accent)"></i>Solo spot</span><span>Tap the strip to jump</span></div>
-      <div class="row">
-        <button class="btn small" type="button" id="prevSpot" aria-label="Earlier solo spot">◀ Earlier</button>
-        <button class="btn small primary grow" type="button" id="goSolo">Play from just before</button>
-        <button class="btn small" type="button" id="nextSpot" aria-label="Later solo spot">Later ▶</button>
+      <button class="btn primary wide" type="button" id="goSolo">Play from just before the solo</button>
+      <div class="grid2">
+        <button class="btn small" type="button" id="prevSpot" aria-label="Earlier solo spot">◀ Earlier spot</button>
+        <button class="btn small" type="button" id="nextSpot" aria-label="Later solo spot">Later spot ▶</button>
       </div>
       <label class="toggle"><input type="checkbox" id="repeatSolo"> Keep looping the solo (practice)</label>
     </article>
@@ -270,9 +275,9 @@ details.card[open] > summary::after { content: "–"; }
     <article class="card">
       <div class="eyebrow">Tempo <span class="tag" id="tempoTag"></span></div>
       <div class="tempo"><span class="bpm" id="bpm">–<small>BPM</small></span><span class="msg" id="tempoNote"></span></div>
-      <div class="row">
-        <button class="btn small" type="button" id="halfT">½× half-time</button>
-        <button class="btn small" type="button" id="doubleT">2× double</button>
+      <div class="grid3">
+        <button class="btn small" type="button" id="halfT">½× Half</button>
+        <button class="btn small" type="button" id="doubleT">2× Double</button>
         <button class="btn small" type="button" id="tapT">Tap tempo</button>
       </div>
     </article>
